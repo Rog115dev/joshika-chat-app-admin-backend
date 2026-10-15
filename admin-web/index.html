@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Joshikai Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=20261014c" />
+</head>
+<body>
+  <div id="app">
+    <section id="login-view" class="login-shell">
+      <form id="admin-login-form" class="login-card" autocomplete="on" novalidate>
+        <div class="brand-mark">J</div>
+        <h1>Joshikai Admin</h1>
+        <p class="muted">Sign in to manage verifications and members.</p>
+        <label>Email
+          <input type="text" id="admin-email" name="email" autocomplete="username" placeholder="admin@joshikai.local" />
+        </label>
+        <label>Password
+          <input type="password" id="admin-password" name="password" autocomplete="current-password" placeholder="admin123" />
+        </label>
+        <button type="submit" id="admin-login-btn" class="btn-primary btn-block">Sign in</button>
+        <p class="hint muted tiny">Default: admin@joshikai.local / admin123</p>
+        <p id="login-error" class="error" hidden></p>
+      </form>
+    </section>
+
+    <section id="dashboard-view" class="dash-shell view-hidden">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-mark sm">J</div>
+          <div>
+            <strong>Joshikai</strong>
+            <span class="muted tiny">Admin</span>
+          </div>
+        </div>
+
+        <nav class="side-nav" aria-label="Admin sections">
+          <button type="button" class="nav-item tab active" data-tab="verifications">
+            Verifications
+          </button>
+          <button type="button" class="nav-item tab" data-tab="users">
+            Members
+          </button>
+        </nav>
+
+        <div class="sidebar-foot">
+          <button type="button" id="refresh-btn" class="btn-ghost btn-block">Refresh</button>
+          <button type="button" id="logout-btn" class="btn-soft btn-block">Sign out</button>
+        </div>
+      </aside>
+
+      <main class="content">
+        <header class="content-head">
+          <button type="button" id="back-btn" class="btn-ghost back-btn" hidden>← Back</button>
+          <div>
+            <h1 id="dash-title">Verifications</h1>
+            <p class="muted tiny" id="dash-subtitle">Review pending ID checks</p>
+          </div>
+        </header>
+
+        <div id="verifications-pane" class="pane">
+          <div id="verifications-list-view" class="pane-view">
+            <div class="filters" role="tablist">
+              <button type="button" data-status="pending" class="filter active">Pending</button>
+              <button type="button" data-status="approved" class="filter">Approved</button>
+              <button type="button" data-status="rejected" class="filter">Rejected</button>
+            </div>
+            <div id="list" class="list"></div>
+          </div>
+          <article id="detail" class="pane-view detail" hidden></article>
+        </div>
+
+        <div id="users-pane" class="pane" hidden>
+          <div id="users-list-view" class="pane-view">
+            <div class="users-toolbar">
+              <input type="search" id="user-search" placeholder="Search name, email, phone…" />
+              <button type="button" id="user-search-btn" class="btn-soft">Search</button>
+            </div>
+            <div id="users-list" class="list"></div>
+          </div>
+          <article id="user-detail" class="pane-view detail" hidden></article>
+        </div>
+      </main>
+    </section>
+  </div>
+  <script src="app.js?v=20261014c"></script>
+</body>
+</html>
