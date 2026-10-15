@@ -10,11 +10,11 @@ npm install
 npm start
 ```
 
-Listens on `0.0.0.0:3000` by default (matches `http://192.168.132.41:3000` in the Flutter API calls).
+Listens on `0.0.0.0:4100` by default (matches `http://23.27.186.171:4100` in the Flutter API calls).
 
 ## Admin web dashboard
 
-Open `http://<host>:3000/admin/` in a browser.
+Open `http://<host>:4100/admin/` in a browser.
 
 Default admin credentials (override with env):
 
@@ -35,7 +35,7 @@ Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in production.
 Override with env vars:
 
 ```bash
-set PORT=3000
+set PORT=4100
 set HOST=0.0.0.0
 npm start
 ```

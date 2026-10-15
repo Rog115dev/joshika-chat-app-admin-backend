@@ -324,7 +324,7 @@ async function doAdminLogin(event) {
     }
     const msg =
       e.message === 'Failed to fetch'
-        ? 'Cannot reach the server. Is it running on this host:3000?'
+        ? 'Cannot reach the server. Is it running on this host:4100?'
         : e.message || 'Login failed';
     if (loginError) {
       loginError.textContent = msg;
