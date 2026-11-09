@@ -449,7 +449,13 @@ app.use(express.json({ limit: '15mb' }));
 app.use('/admin', express.static(path.join(__dirname, 'admin-web')));
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, verifications: verifications.length, users: users.length });
+  res.json({
+    ok: true,
+    verifications: verifications.length,
+    users: users.length,
+    selfieMedia: true,
+    build: 'selfie-media-v1',
+  });
 });
 
 // ——— User auth ———
