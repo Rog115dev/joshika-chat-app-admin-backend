@@ -139,6 +139,10 @@ function loadData() {
     console.log(
       `Loaded ${users.length} users, ${verifications.length} verifications, ${invitations.length} invitations from data.json (nextVerificationId=${nextVerificationId})`,
     );
+    const selfieBackfill = backfillApprovedSelfies();
+    if (selfieBackfill) {
+      console.log('Backfilled approved selfie → profileImageUrl for existing members');
+    }
     saveData();
   } catch (err) {
     console.error('Failed to load data.json', err);
@@ -261,6 +265,7 @@ function publicUser(user) {
     String(user.verificationStatus || '').toLowerCase() === 'approved';
   return {
     ...rest,
+    profileImageUrl: effectiveProfileImageUrl(user),
     isVerified,
     trustLadder: bestTrustLadderForUser(user),
   };
@@ -295,6 +300,70 @@ function normalizeImageUrl(raw) {
     s = `https://${s}`;
   }
   return s;
+}
+
+function isUsableSelfieUrl(raw) {
+  const s = normalizeImageUrl(raw);
+  return s.startsWith('data:image') || /^https?:\/\//i.test(s);
+}
+
+function latestVerificationForUser(user) {
+  if (!user) return null;
+  const email = String(user.email || '').toLowerCase();
+  const rows = verifications.filter((v) => {
+    if (email && String(v.email || '').toLowerCase() === email) return true;
+    if (user.id != null && v.userId === user.id) return true;
+    return false;
+  });
+  if (!rows.length) return null;
+  return rows.sort((a, b) =>
+    String(b.submittedAt || '').localeCompare(String(a.submittedAt || '')),
+  )[0];
+}
+
+/**
+ * After admin approval, the selfie becomes the Profile / My Preference photo.
+ * Overwrites registration placeholders (stock URLs / junk strings).
+ */
+function applyApprovedSelfieToProfile(user, selfieUrl) {
+  const selfie = normalizeImageUrl(selfieUrl);
+  if (!user || !isUsableSelfieUrl(selfie)) return false;
+  user.profileImageUrl = selfie;
+  return true;
+}
+
+/** Prefer approved selfie over leftover registration avatar URLs. */
+function effectiveProfileImageUrl(user) {
+  if (!user) return '';
+  const current = normalizeImageUrl(user.profileImageUrl);
+  if (String(user.verificationStatus || '').toLowerCase() !== 'approved') {
+    return current;
+  }
+  const linked = latestVerificationForUser(user);
+  const selfie = normalizeImageUrl(linked?.selfieUrl);
+  if (isUsableSelfieUrl(selfie) && !current.startsWith('data:image')) {
+    return selfie;
+  }
+  return current || selfie;
+}
+
+/** One-time / startup repair for members already approved before selfie copy. */
+function backfillApprovedSelfies() {
+  let changed = false;
+  for (const user of users) {
+    if (String(user.verificationStatus || '').toLowerCase() !== 'approved') {
+      continue;
+    }
+    const linked = latestVerificationForUser(user);
+    const selfie = normalizeImageUrl(linked?.selfieUrl);
+    if (!isUsableSelfieUrl(selfie)) continue;
+    const current = normalizeImageUrl(user.profileImageUrl);
+    if (current.startsWith('data:image')) continue;
+    user.profileImageUrl = selfie;
+    if (linked) linked.profileImageUrl = selfie;
+    changed = true;
+  }
+  return changed;
 }
 
 function isPrivateHostname(hostname) {
@@ -432,6 +501,28 @@ app.post('/auth/login', async (req, res) => {
   res.json({ token, user: publicUser(user) });
 });
 
+app.post('/auth/forgot-password', async (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const email = str(body.email).toLowerCase();
+  const newPassword = String(body.newPassword || body.password || '');
+  if (!email || !newPassword) {
+    return res.status(400).json({ error: 'Email and new password are required' });
+  }
+  if (newPassword.trim().length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+  const user = findUserByEmail(email);
+  // Always succeed to avoid email enumeration; only update when the account exists.
+  if (user) {
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    for (const [tok, uid] of userSessions.entries()) {
+      if (uid === user.id) userSessions.delete(tok);
+    }
+    saveData();
+  }
+  res.json({ ok: true });
+});
+
 app.get('/auth/me', (req, res) => {
   const user = authUser(req);
   if (!user) {
@@ -456,26 +547,7 @@ app.patch('/auth/me', (req, res) => {
   if (typeof body.nearbyOn === 'boolean') user.nearbyOn = body.nearbyOn;
   if (typeof body.jpToEnOn === 'boolean') user.jpToEnOn = body.jpToEnOn;
   if (typeof body.enToJpOn === 'boolean') user.enToJpOn = body.enToJpOn;
-  saveData();
-  res.json({ user: publicUser(user) });
-});
-
-app.patch('/auth/me', (req, res) => {
-  const user = authUser(req);
-  if (!user) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  const body = req.body && typeof req.body === 'object' ? req.body : {};
-  if (Array.isArray(body.interests)) {
-    user.interests = body.interests
-      .map((x) => String(x).trim())
-      .filter(Boolean)
-      .slice(0, 5);
-  }
-  if (typeof body.similarAgeOn === 'boolean') user.similarAgeOn = body.similarAgeOn;
-  if (typeof body.nearbyOn === 'boolean') user.nearbyOn = body.nearbyOn;
-  if (typeof body.jpToEnOn === 'boolean') user.jpToEnOn = body.jpToEnOn;
-  if (typeof body.enToJpOn === 'boolean') user.enToJpOn = body.enToJpOn;
+  if (body.bio != null) user.bio = str(body.bio);
   saveData();
   res.json({ user: publicUser(user) });
 });
@@ -586,7 +658,7 @@ app.patch('/admin/users/:id', async (req, res) => {
     }
   }
 
-  // Keep latest verification row in sync for admin queue display.
+  // Keep latest verification row in sync for admin UI display.
   const email = String(user.email || '').toLowerCase();
   const linked = verifications
     .filter((v) => String(v.email || '').toLowerCase() === email)
@@ -605,6 +677,11 @@ app.patch('/admin/users/:id', async (req, res) => {
     linked.interests = user.interests || [];
     if (body.verificationStatus != null) {
       linked.status = user.verificationStatus;
+    }
+    if (String(user.verificationStatus || '').toLowerCase() === 'approved') {
+      if (applyApprovedSelfieToProfile(user, linked.selfieUrl)) {
+        linked.profileImageUrl = user.profileImageUrl;
+      }
     }
   }
 
@@ -894,6 +971,12 @@ app.patch('/id-verifications/:id', (req, res) => {
     u.verificationStatus = updated.status;
     u.verificationId = updated.id;
     updated.userId = u.id;
+    // After admin approval, selfie becomes the member profile photo
+    // (overwrites registration placeholder avatars).
+    if (String(updated.status || '').toLowerCase() === 'approved') {
+      applyApprovedSelfieToProfile(u, updated.selfieUrl);
+      updated.profileImageUrl = u.profileImageUrl;
+    }
     verifications[index] = updated;
   }
 
@@ -940,7 +1023,7 @@ function publicProfile(user) {
     email: user.email,
     name: user.name || user.nickname || '',
     nickname: user.nickname || user.name || '',
-    profileImageUrl: user.profileImageUrl || '',
+    profileImageUrl: effectiveProfileImageUrl(user),
     lifeStatus: user.lifeStatus || '',
     age: user.age || 0,
     placeOfLiving: user.placeOfLiving || '',
