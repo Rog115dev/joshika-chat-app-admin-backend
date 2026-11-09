@@ -9,6 +9,10 @@ const PORT = Number(process.env.PORT) || 4100;
 const HOST = process.env.HOST || '0.0.0.0';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@joshikai.local';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+/** Public base used in profileImageUrl (phone app must reach this host). */
+const PUBLIC_API_BASE = (
+  process.env.PUBLIC_API_BASE || `http://23.27.186.171:${PORT}`
+).replace(/\/$/, '');
 const DATA_FILE = path.join(__dirname, 'data.json');
 
 /** @type {Map<string, number>} */
@@ -321,46 +325,48 @@ function latestVerificationForUser(user) {
   )[0];
 }
 
+function selfieMediaUrl(userId) {
+  return `${PUBLIC_API_BASE}/media/selfie/${userId}`;
+}
+
+function hasApprovedSelfie(user) {
+  if (!user) return false;
+  if (String(user.verificationStatus || '').toLowerCase() !== 'approved') {
+    return false;
+  }
+  const linked = latestVerificationForUser(user);
+  return isUsableSelfieUrl(linked?.selfieUrl);
+}
+
 /**
  * After admin approval, the selfie becomes the Profile / My Preference photo.
- * Overwrites registration placeholders (stock URLs / junk strings).
+ * Clients get a stable HTTP URL (not a huge data: URI in every JSON payload).
  */
 function applyApprovedSelfieToProfile(user, selfieUrl) {
-  const selfie = normalizeImageUrl(selfieUrl);
-  if (!user || !isUsableSelfieUrl(selfie)) return false;
-  user.profileImageUrl = selfie;
+  if (!user || !isUsableSelfieUrl(selfieUrl)) return false;
+  user.profileImageUrl = selfieMediaUrl(user.id);
   return true;
 }
 
 /** Prefer approved selfie over leftover registration avatar URLs. */
 function effectiveProfileImageUrl(user) {
   if (!user) return '';
-  const current = normalizeImageUrl(user.profileImageUrl);
-  if (String(user.verificationStatus || '').toLowerCase() !== 'approved') {
-    return current;
+  if (hasApprovedSelfie(user)) {
+    return selfieMediaUrl(user.id);
   }
-  const linked = latestVerificationForUser(user);
-  const selfie = normalizeImageUrl(linked?.selfieUrl);
-  if (isUsableSelfieUrl(selfie) && !current.startsWith('data:image')) {
-    return selfie;
-  }
-  return current || selfie;
+  return normalizeImageUrl(user.profileImageUrl);
 }
 
 /** One-time / startup repair for members already approved before selfie copy. */
 function backfillApprovedSelfies() {
   let changed = false;
   for (const user of users) {
-    if (String(user.verificationStatus || '').toLowerCase() !== 'approved') {
-      continue;
-    }
+    if (!hasApprovedSelfie(user)) continue;
+    const next = selfieMediaUrl(user.id);
+    if (user.profileImageUrl === next) continue;
+    user.profileImageUrl = next;
     const linked = latestVerificationForUser(user);
-    const selfie = normalizeImageUrl(linked?.selfieUrl);
-    if (!isUsableSelfieUrl(selfie)) continue;
-    const current = normalizeImageUrl(user.profileImageUrl);
-    if (current.startsWith('data:image')) continue;
-    user.profileImageUrl = selfie;
-    if (linked) linked.profileImageUrl = selfie;
+    if (linked) linked.profileImageUrl = next;
     changed = true;
   }
   return changed;
@@ -713,6 +719,38 @@ app.post('/admin/users/:id/reset-password', async (req, res) => {
     email: user.email,
     temporaryPassword: newPassword,
   });
+});
+
+/** Serve the member's approved selfie as a real image (for Profile / Preference). */
+app.get('/media/selfie/:userId', (req, res) => {
+  const id = Number.parseInt(req.params.userId, 10);
+  const user = findUserById(id);
+  if (!user) return res.status(404).json({ error: 'Not found' });
+
+  const linked = latestVerificationForUser(user);
+  let selfie = normalizeImageUrl(linked?.selfieUrl || '');
+  if (!isUsableSelfieUrl(selfie)) {
+    selfie = normalizeImageUrl(user.profileImageUrl);
+  }
+  if (selfie.startsWith('data:image') && selfie.includes(',')) {
+    const comma = selfie.indexOf(',');
+    const meta = selfie.slice(0, comma);
+    const b64 = selfie.slice(comma + 1);
+    const mimeMatch = /data:(image\/[a-zA-Z0-9.+-]+)/i.exec(meta);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    try {
+      const buf = Buffer.from(b64, 'base64');
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      return res.send(buf);
+    } catch {
+      return res.status(500).json({ error: 'Invalid selfie data' });
+    }
+  }
+  if (/^https?:\/\//i.test(selfie) && !selfie.includes('/media/selfie/')) {
+    return res.redirect(302, selfie);
+  }
+  return res.status(404).json({ error: 'No selfie on file' });
 });
 
 /** Image proxy so admin/app avatars still render when hosts block hotlinking.
