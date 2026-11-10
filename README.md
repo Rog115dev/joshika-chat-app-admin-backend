@@ -31,12 +31,23 @@ Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in production.
 - `POST /auth/register` — create account (email + password + profile fields)
 - `POST /auth/login` — returns `{ token, user }`
 - `GET /auth/me` — Bearer user token
+- `POST /auth/forgot-password` — `{ email }` emails a 6-digit code via Resend
+- `POST /auth/reset-password` — `{ email, code, newPassword }` sets the new password
+
+### Forgot password (Resend)
+
+1. Copy `.env.example` → `.env`
+2. Set `RESEND_API_KEY=re_...` (and optionally `RESEND_FROM_EMAIL`)
+3. Restart the server
+
+Until the key is set, `/auth/forgot-password` returns HTTP 503.
 
 Override with env vars:
 
 ```bash
 set PORT=4100
 set HOST=0.0.0.0
+set RESEND_API_KEY=re_xxxxxxxx
 npm start
 ```
 

@@ -5,6 +5,34 @@ const fs = require('fs');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 
+function strEnv(name) {
+  const v = process.env[name];
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+/** Load local .env without an extra dependency (RESEND_API_KEY, etc.). */
+(function loadDotEnv() {
+  try {
+    const envPath = path.join(__dirname, '.env');
+    if (!fs.existsSync(envPath)) return;
+    for (const rawLine of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq <= 0) continue;
+      const key = line.slice(0, eq).trim();
+      let val = line.slice(eq + 1).trim();
+      if (
+        (val.startsWith('"') && val.endsWith('"')) ||
+        (val.startsWith("'") && val.endsWith("'"))
+      ) {
+        val = val.slice(1, -1);
+      }
+      if (key && process.env[key] == null) process.env[key] = val;
+    }
+  } catch (_) {}
+})();
+
 const PORT = Number(process.env.PORT) || 4100;
 const HOST = process.env.HOST || '0.0.0.0';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@joshikai.local';
@@ -13,12 +41,18 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 const PUBLIC_API_BASE = (
   process.env.PUBLIC_API_BASE || `http://23.27.186.171:${PORT}`
 ).replace(/\/$/, '');
+/** Resend.com API key for password-reset emails (set via env / .env). */
+const RESEND_API_KEY = strEnv('RESEND_API_KEY');
+const RESEND_FROM_EMAIL =
+  strEnv('RESEND_FROM_EMAIL') || 'Joshikai <onboarding@resend.dev>';
 const DATA_FILE = path.join(__dirname, 'data.json');
 
 /** @type {Map<string, number>} */
 const userSessions = new Map();
 /** @type {Map<string, string>} admin token -> email */
 const adminSessions = new Map();
+/** email -> { code, expiresAt } for password reset */
+const passwordResetCodes = new Map();
 
 /** @type {Array<object>} */
 let users = [];
@@ -513,25 +547,133 @@ app.post('/auth/login', async (req, res) => {
   res.json({ token, user: publicUser(user) });
 });
 
+function makeResetCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+async function sendPasswordResetEmail(toEmail, code) {
+  if (!RESEND_API_KEY) {
+    const err = new Error(
+      'RESEND_API_KEY is not configured on the server',
+    );
+    err.code = 'NO_RESEND_KEY';
+    throw err;
+  }
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: RESEND_FROM_EMAIL,
+      to: [toEmail],
+      subject: 'Joshikai password reset code',
+      html: `
+        <div style="font-family: Georgia, serif; color: #3E2723; line-height: 1.5;">
+          <h2 style="margin: 0 0 12px;">Reset your Joshikai password</h2>
+          <p>Use this 6-digit code in the app to set a new password. It expires in 15 minutes.</p>
+          <p style="font-size: 28px; letter-spacing: 6px; font-weight: 700;">${code}</p>
+          <p style="color: #8C6860; font-size: 13px;">If you did not request this, you can ignore this email.</p>
+        </div>
+      `,
+      text: `Your Joshikai password reset code is ${code}. It expires in 15 minutes.`,
+    }),
+  });
+  if (!response.ok) {
+    let detail = '';
+    try {
+      const body = await response.json();
+      detail = body?.message || body?.error || JSON.stringify(body);
+    } catch (_) {
+      detail = await response.text();
+    }
+    const err = new Error(
+      `Resend failed (${response.status})${detail ? `: ${detail}` : ''}`,
+    );
+    err.code = 'RESEND_FAILED';
+    throw err;
+  }
+}
+
+/** Step 1: email a reset code (Resend). Does not change the password yet. */
 app.post('/auth/forgot-password', async (req, res) => {
   const body = req.body && typeof req.body === 'object' ? req.body : {};
   const email = str(body.email).toLowerCase();
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+
+  const user = findUserByEmail(email);
+  // Always return a generic success when the account is unknown (no enumeration).
+  if (!user) {
+    return res.json({ ok: true, sent: true });
+  }
+
+  if (!RESEND_API_KEY) {
+    return res.status(503).json({
+      error:
+        'Password reset email is not configured yet. Set RESEND_API_KEY on the server.',
+    });
+  }
+
+  const code = makeResetCode();
+  passwordResetCodes.set(email, {
+    code,
+    expiresAt: Date.now() + 15 * 60 * 1000,
+  });
+
+  try {
+    await sendPasswordResetEmail(email, code);
+  } catch (e) {
+    passwordResetCodes.delete(email);
+    console.error('Password reset email failed:', e.message || e);
+    return res.status(502).json({
+      error:
+        e.code === 'NO_RESEND_KEY'
+          ? e.message
+          : 'Could not send reset email. Please try again later.',
+    });
+  }
+
+  res.json({ ok: true, sent: true });
+});
+
+/** Step 2: confirm email code + set new password, then user can re-login. */
+app.post('/auth/reset-password', async (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const email = str(body.email).toLowerCase();
+  const code = str(body.code);
   const newPassword = String(body.newPassword || body.password || '');
-  if (!email || !newPassword) {
-    return res.status(400).json({ error: 'Email and new password are required' });
+
+  if (!email || !code || !newPassword) {
+    return res.status(400).json({
+      error: 'Email, code, and new password are required',
+    });
   }
   if (newPassword.trim().length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    return res.status(400).json({
+      error: 'Password must be at least 6 characters',
+    });
   }
+
+  const entry = passwordResetCodes.get(email);
+  if (!entry || entry.code !== code || Date.now() > entry.expiresAt) {
+    return res.status(400).json({
+      error: 'Invalid or expired reset code',
+    });
+  }
+
   const user = findUserByEmail(email);
-  // Always succeed to avoid email enumeration; only update when the account exists.
-  if (user) {
-    user.passwordHash = await bcrypt.hash(newPassword, 10);
-    for (const [tok, uid] of userSessions.entries()) {
-      if (uid === user.id) userSessions.delete(tok);
-    }
-    saveData();
+  if (!user) {
+    passwordResetCodes.delete(email);
+    return res.status(404).json({ error: 'Account not found' });
   }
+
+  user.passwordHash = await bcrypt.hash(newPassword, 10);
+  clearUserSessions(user.id);
+  passwordResetCodes.delete(email);
+  saveData();
   res.json({ ok: true });
 });
 
