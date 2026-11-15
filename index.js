@@ -619,6 +619,11 @@ app.post('/auth/register', async (req, res) => {
     if (await findUserByEmail(profile.email)) {
       return res.status(409).json({ error: 'Email already registered' });
     }
+    if (!profile.age || profile.age < 18) {
+      return res.status(400).json({
+        error: 'You must be 18 or older to register',
+      });
+    }
 
     const passwordHash = await bcrypt.hash(profile.password, 10);
     const user = await User.create({
@@ -668,6 +673,16 @@ app.post('/auth/login', async (req, res) => {
     console.error('login failed', err);
     res.status(500).json({ error: 'Login failed' });
   }
+});
+
+/** Public email availability check for registration UI. */
+app.get('/auth/check-email', async (req, res) => {
+  const email = str(req.query.email).toLowerCase();
+  if (!email) {
+    return res.status(400).json({ error: 'email required' });
+  }
+  const user = await findUserByEmail(email);
+  res.json({ exists: !!user, email });
 });
 
 /** Step 1: email a reset code (Resend). Does not change the password yet. */
@@ -1167,6 +1182,11 @@ app.post('/id-verifications', async (req, res) => {
         }
         user = existing;
       } else {
+        if (!profile.age || profile.age < 18) {
+          return res.status(400).json({
+            error: 'You must be 18 or older to register',
+          });
+        }
         user = await User.create({
           id: await getNextId('userId'),
           email: profile.email,

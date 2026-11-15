@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ja">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20261014c" />
+  <link rel="stylesheet" href="styles.css?v=20261114a" />
 </head>
 <body>
   <div id="app">
@@ -15,14 +15,14 @@
       <form id="admin-login-form" class="login-card" autocomplete="on" novalidate>
         <div class="brand-mark">J</div>
         <h1>Joshikai Admin</h1>
-        <p class="muted">Sign in to manage verifications and members.</p>
-        <label>Email
+        <p class="muted">本人確認とメンバー管理 / Sign in to manage the community</p>
+        <label>メール / Email
           <input type="text" id="admin-email" name="email" autocomplete="username" placeholder="admin@joshikai.local" />
         </label>
-        <label>Password
-          <input type="password" id="admin-password" name="password" autocomplete="current-password" placeholder="admin123" />
+        <label>パスワード / Password
+          <input type="password" id="admin-password" name="password" autocomplete="current-password" placeholder="••••••••" />
         </label>
-        <button type="submit" id="admin-login-btn" class="btn-primary btn-block">Sign in</button>
+        <button type="submit" id="admin-login-btn" class="btn-primary btn-block">ログイン / Sign in</button>
         <p class="hint muted tiny">Default: admin@joshikai.local / admin123</p>
         <p id="login-error" class="error" hidden></p>
       </form>
@@ -34,59 +34,96 @@
           <div class="brand-mark sm">J</div>
           <div>
             <strong>Joshikai</strong>
-            <span class="muted tiny">Admin</span>
+            <span class="muted tiny">Admin Console</span>
           </div>
         </div>
 
         <nav class="side-nav" aria-label="Admin sections">
           <button type="button" class="nav-item tab active" data-tab="verifications">
-            Verifications
+            <span class="nav-label">本人確認</span>
+            <span class="nav-sub">Verifications</span>
+            <span id="pending-pill" class="nav-pill" hidden>0</span>
           </button>
           <button type="button" class="nav-item tab" data-tab="users">
-            Members
+            <span class="nav-label">メンバー</span>
+            <span class="nav-sub">Members</span>
           </button>
         </nav>
 
+        <div class="sidebar-stats" id="sidebar-stats" aria-live="polite">
+          <div class="stat">
+            <span class="stat-value" id="stat-pending">—</span>
+            <span class="stat-label">Pending</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value" id="stat-members">—</span>
+            <span class="stat-label">Members</span>
+          </div>
+        </div>
+
         <div class="sidebar-foot">
-          <button type="button" id="refresh-btn" class="btn-ghost btn-block">Refresh</button>
-          <button type="button" id="logout-btn" class="btn-soft btn-block">Sign out</button>
+          <button type="button" id="refresh-btn" class="btn-ghost btn-block">更新 / Refresh</button>
+          <button type="button" id="logout-btn" class="btn-soft btn-block">ログアウト</button>
         </div>
       </aside>
 
       <main class="content">
         <header class="content-head">
-          <button type="button" id="back-btn" class="btn-ghost back-btn" hidden>← Back</button>
-          <div>
-            <h1 id="dash-title">Verifications</h1>
-            <p class="muted tiny" id="dash-subtitle">Review pending ID checks</p>
+          <button type="button" id="back-btn" class="btn-ghost back-btn" hidden>← 戻る</button>
+          <div class="head-copy">
+            <h1 id="dash-title">本人確認</h1>
+            <p class="muted tiny" id="dash-subtitle">提出された本人確認を確認・承認します</p>
           </div>
+          <div class="head-actions" id="head-actions"></div>
         </header>
 
-        <div id="verifications-pane" class="pane">
-          <div id="verifications-list-view" class="pane-view">
-            <div class="filters" role="tablist">
-              <button type="button" data-status="pending" class="filter active">Pending</button>
-              <button type="button" data-status="approved" class="filter">Approved</button>
-              <button type="button" data-status="rejected" class="filter">Rejected</button>
+        <div id="verifications-pane" class="pane workspace">
+          <div id="verifications-list-view" class="pane-view list-pane">
+            <div class="filters" role="tablist" aria-label="Verification status">
+              <button type="button" data-status="pending" class="filter active">
+                未対応 <span class="filter-count" id="count-pending"></span>
+              </button>
+              <button type="button" data-status="approved" class="filter">
+                承認済 <span class="filter-count" id="count-approved"></span>
+              </button>
+              <button type="button" data-status="rejected" class="filter">
+                却下 <span class="filter-count" id="count-rejected"></span>
+              </button>
             </div>
             <div id="list" class="list"></div>
           </div>
-          <article id="detail" class="pane-view detail" hidden></article>
+          <article id="detail" class="pane-view detail detail-pane">
+            <div class="empty-panel">
+              <div class="empty-icon">✓</div>
+              <h2>提出を選択</h2>
+              <p class="muted">左のリストから本人確認を選ぶと、セルフィーとプロフィールを確認できます。</p>
+            </div>
+          </article>
         </div>
 
-        <div id="users-pane" class="pane" hidden>
-          <div id="users-list-view" class="pane-view">
+        <div id="users-pane" class="pane workspace" hidden>
+          <div id="users-list-view" class="pane-view list-pane">
             <div class="users-toolbar">
-              <input type="search" id="user-search" placeholder="Search name, email, phone…" />
-              <button type="button" id="user-search-btn" class="btn-soft">Search</button>
+              <input type="search" id="user-search" placeholder="名前・メール・電話で検索…" />
+              <button type="button" id="user-search-btn" class="btn-soft">検索</button>
             </div>
             <div id="users-list" class="list"></div>
           </div>
-          <article id="user-detail" class="pane-view detail" hidden></article>
+          <article id="user-detail" class="pane-view detail detail-pane">
+            <div class="empty-panel">
+              <div class="empty-icon">◎</div>
+              <h2>メンバーを選択</h2>
+              <p class="muted">左からメンバーを選ぶと、プロフィール編集やパスワードリセットができます。</p>
+            </div>
+          </article>
         </div>
       </main>
     </section>
   </div>
-  <script src="app.js?v=20261014c"></script>
+
+  <div id="toast-host" class="toast-host" aria-live="polite"></div>
+  <div id="modal-host" class="modal-host" hidden></div>
+
+  <script src="app.js?v=20261114a"></script>
 </body>
 </html>
