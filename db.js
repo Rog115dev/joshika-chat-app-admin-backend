@@ -1,3 +1,4 @@
+const dns = require('dns');
 const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
@@ -12,9 +13,47 @@ const {
 
 const DATA_FILE = path.join(__dirname, 'data.json');
 
+/**
+ * Many VPS / Windows hosts use a broken local DNS stub (127.0.0.1) that
+ * refuses MongoDB Atlas SRV lookups (querySrv ECONNREFUSED). Prefer public DNS.
+ */
+function ensurePublicDnsForAtlas() {
+  try {
+    const current = dns.getServers();
+    const brokenLocal =
+      !current.length ||
+      current.every((s) => s === '127.0.0.1' || s === '::1');
+    if (brokenLocal || process.env.MONGODB_FORCE_PUBLIC_DNS === '1') {
+      dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+      console.log(
+        `MongoDNS: using public resolvers (was: ${current.join(', ') || 'none'})`,
+      );
+    }
+  } catch (err) {
+    console.warn('MongoDNS: could not adjust resolvers', err.message || err);
+  }
+}
+
 async function connectMongo(uri) {
   mongoose.set('strictQuery', true);
-  await mongoose.connect(uri);
+  ensurePublicDnsForAtlas();
+  try {
+    await mongoose.connect(uri, {
+      serverSelectionTimeoutMS: 20000,
+    });
+  } catch (err) {
+    const msg = String(err && err.message ? err.message : err);
+    // Retry once with forced public DNS if SRV lookup failed.
+    if (/querySrv|ECONNREFUSED|ENOTFOUND|EREFUSED/i.test(msg)) {
+      console.warn(`MongoDNS: connect failed (${msg}); forcing 8.8.8.8 / 1.1.1.1`);
+      dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+      await mongoose.connect(uri, {
+        serverSelectionTimeoutMS: 20000,
+      });
+    } else {
+      throw err;
+    }
+  }
   console.log(`Connected to MongoDB: ${uri.replace(/\/\/.*@/, '//***@')}`);
 }
 
