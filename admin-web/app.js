@@ -5,8 +5,10 @@ let token = localStorage.getItem(TOKEN_KEY) || '';
 let selectedStatus = 'pending';
 let selectedId = null;
 let selectedUserId = null;
+let selectedReportId = null;
+let selectedReportStatus = 'pending';
 let activeTab = 'verifications';
-let counts = { pending: 0, approved: 0, rejected: 0, members: 0 };
+let counts = { pending: 0, approved: 0, rejected: 0, members: 0, reportsPending: 0 };
 
 const loginView = document.getElementById('login-view');
 const dashboardView = document.getElementById('dashboard-view');
@@ -14,6 +16,9 @@ const listEl = document.getElementById('list');
 const detailEl = document.getElementById('detail');
 const usersListEl = document.getElementById('users-list');
 const userDetailEl = document.getElementById('user-detail');
+const reportsListEl = document.getElementById('reports-list');
+const reportDetailEl = document.getElementById('report-detail');
+const reportsListView = document.getElementById('reports-list-view');
 const loginError = document.getElementById('login-error');
 const dashTitle = document.getElementById('dash-title');
 const dashSubtitle = document.getElementById('dash-subtitle');
@@ -244,6 +249,15 @@ function updateStatsUi() {
       pill.hidden = true;
     }
   }
+  const reportsPill = document.getElementById('reports-pill');
+  if (reportsPill) {
+    if (counts.reportsPending > 0) {
+      reportsPill.hidden = false;
+      reportsPill.textContent = String(counts.reportsPending);
+    } else {
+      reportsPill.hidden = true;
+    }
+  }
   const map = {
     pending: document.getElementById('count-pending'),
     approved: document.getElementById('count-approved'),
@@ -258,17 +272,19 @@ function updateStatsUi() {
 
 async function refreshCounts() {
   try {
-    const [pending, approved, rejected, members] = await Promise.all([
+    const [pending, approved, rejected, members, reportsPending] = await Promise.all([
       api('/id-verifications?status=pending&limit=200'),
       api('/id-verifications?status=approved&limit=200'),
       api('/id-verifications?status=rejected&limit=200'),
       api('/admin/users'),
+      api('/admin/reports?status=pending&limit=200'),
     ]);
     counts = {
       pending: Array.isArray(pending) ? pending.length : 0,
       approved: Array.isArray(approved) ? approved.length : 0,
       rejected: Array.isArray(rejected) ? rejected.length : 0,
       members: Array.isArray(members) ? members.length : 0,
+      reportsPending: Array.isArray(reportsPending) ? reportsPending.length : 0,
     };
     updateStatsUi();
   } catch (e) {
@@ -338,6 +354,7 @@ function syncMobilePanes() {
   const mobile = isMobileLayout();
   const verOpen = activeTab === 'verifications' && selectedId != null;
   const userOpen = activeTab === 'users' && selectedUserId != null;
+  const reportOpen = activeTab === 'reports' && selectedReportId != null;
 
   if (verificationsListView) {
     verificationsListView.classList.toggle(
@@ -357,8 +374,17 @@ function syncMobilePanes() {
       mobile && !userOpen && activeTab === 'users',
     );
   }
+  if (reportsListView) {
+    reportsListView.classList.toggle('collapsed-mobile', mobile && reportOpen);
+  }
+  if (reportDetailEl) {
+    reportDetailEl.classList.toggle(
+      'collapsed-mobile',
+      mobile && !reportOpen && activeTab === 'reports',
+    );
+  }
   if (backBtn) {
-    backBtn.hidden = !(mobile && (verOpen || userOpen));
+    backBtn.hidden = !(mobile && (verOpen || userOpen || reportOpen));
   }
 }
 
@@ -366,6 +392,9 @@ function showListMode() {
   if (activeTab === 'users') {
     selectedUserId = null;
     renderUserEmpty();
+  } else if (activeTab === 'reports') {
+    selectedReportId = null;
+    renderReportEmpty();
   } else {
     selectedId = null;
     renderVerificationEmpty();
@@ -376,7 +405,9 @@ function showListMode() {
     dashSubtitle.textContent =
       activeTab === 'users'
         ? 'アカウントの検索・編集・パスワードリセット'
-        : '提出された本人確認を確認・承認します';
+        : activeTab === 'reports'
+          ? 'メンバーからの通報を確認・対応します'
+          : '提出された本人確認を確認・承認します';
   }
 }
 
@@ -402,6 +433,17 @@ function renderUserEmpty() {
   `;
 }
 
+function renderReportEmpty() {
+  if (!reportDetailEl) return;
+  reportDetailEl.innerHTML = `
+    <div class="empty-panel">
+      <div class="empty-icon">⚑</div>
+      <h2>通報を選択</h2>
+      <p class="muted">左から通報を選ぶと、内容の確認とステータス更新ができます。</p>
+    </div>
+  `;
+}
+
 function fillCardBody(card, title, lines, badgesHtml) {
   const body = document.createElement('div');
   body.className = 'card-body';
@@ -420,10 +462,15 @@ function setTab(tab) {
   });
   document.getElementById('verifications-pane').hidden = tab !== 'verifications';
   document.getElementById('users-pane').hidden = tab !== 'users';
+  const reportsPane = document.getElementById('reports-pane');
+  if (reportsPane) reportsPane.hidden = tab !== 'reports';
   showListMode();
   if (tab === 'verifications') {
     dashTitle.textContent = '本人確認';
     loadList();
+  } else if (tab === 'reports') {
+    dashTitle.textContent = '通報';
+    loadReports();
   } else {
     dashTitle.textContent = 'メンバー';
     loadUsers();
@@ -499,6 +546,7 @@ document.getElementById('logout-btn')?.addEventListener('click', () => {
 backBtn?.addEventListener('click', () => {
   showListMode();
   if (activeTab === 'users') loadUsers();
+  else if (activeTab === 'reports') loadReports();
   else loadList();
 });
 
@@ -507,12 +555,27 @@ document.getElementById('refresh-btn')?.addEventListener('click', async () => {
   if (activeTab === 'users') {
     if (selectedUserId != null) openUserDetail(selectedUserId);
     else loadUsers();
+  } else if (activeTab === 'reports') {
+    if (selectedReportId != null) openReportDetail(selectedReportId);
+    else loadReports();
   } else if (selectedId != null) {
     openDetail(selectedId);
   } else {
     loadList();
   }
   toast('最新の状態に更新しました');
+});
+
+document.querySelectorAll('.report-filter').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document
+      .querySelectorAll('.report-filter')
+      .forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedReportStatus = btn.dataset.reportStatus || 'pending';
+    showListMode();
+    loadReports();
+  });
 });
 
 document.querySelectorAll('.tab').forEach((btn) => {
@@ -945,6 +1008,145 @@ async function deleteUser(id, name) {
   } catch (e) {
     showUserMsg(e.message, true);
     toast(e.message, 'err');
+  }
+}
+
+function reportStatusBadge(status) {
+  const s = String(status || 'pending').toLowerCase();
+  const label =
+    s === 'reviewed' ? '対応済' : s === 'dismissed' ? '却下' : '未対応';
+  const cls =
+    s === 'reviewed'
+      ? 'badge-approved'
+      : s === 'dismissed'
+        ? 'badge-rejected'
+        : 'badge-pending';
+  return `<span class="badge ${cls}">${escapeHtml(label)}</span>`;
+}
+
+async function loadReports() {
+  if (!reportsListEl) return;
+  reportsListEl.innerHTML = '<p class="muted" style="padding:12px">読み込み中…</p>';
+  try {
+    const rows = await api(
+      `/admin/reports?status=${encodeURIComponent(selectedReportStatus)}&limit=200`,
+    );
+    reportsListEl.innerHTML = '';
+    if (!Array.isArray(rows) || rows.length === 0) {
+      reportsListEl.innerHTML =
+        '<p class="muted" style="padding:12px">通報はありません。</p>';
+      return;
+    }
+    for (const row of rows) {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'card';
+      if (selectedReportId === row.id) card.classList.add('selected');
+      const reported =
+        row.reportedUser?.nickname ||
+        row.reportedUser?.email ||
+        `#${row.reportedUserId}`;
+      const reporter =
+        row.reporter?.nickname || row.reporter?.email || `#${row.reporterId}`;
+      fillCardBody(
+        card,
+        reported,
+        [
+          `理由: ${row.reason || '—'}`,
+          `通報者: ${reporter}`,
+          formatWhen(row.createdAt),
+        ],
+        reportStatusBadge(row.status),
+      );
+      card.addEventListener('click', () => openReportDetail(row.id, row));
+      reportsListEl.appendChild(card);
+    }
+  } catch (e) {
+    reportsListEl.innerHTML = `<p class="error" style="padding:12px">${escapeHtml(e.message)}</p>`;
+  }
+}
+
+async function openReportDetail(id, cached) {
+  selectedReportId = id;
+  syncMobilePanes();
+  document
+    .querySelectorAll('#reports-list .card')
+    .forEach((c) => c.classList.remove('selected'));
+  const cards = reportsListEl?.querySelectorAll('.card') || [];
+  cards.forEach((c, i) => {
+    // selection restyled on reload; ignore index match
+  });
+  if (!reportDetailEl) return;
+  reportDetailEl.innerHTML = '<p class="muted">読み込み中…</p>';
+  try {
+    let row = cached;
+    if (!row || row.id !== id) {
+      const rows = await api(
+        `/admin/reports?status=all&limit=200`,
+      );
+      row = Array.isArray(rows) ? rows.find((r) => r.id === id) : null;
+    }
+    if (!row) {
+      reportDetailEl.innerHTML = '<p class="error">通報が見つかりません。</p>';
+      return;
+    }
+    const reported =
+      row.reportedUser?.nickname ||
+      row.reportedUser?.email ||
+      `#${row.reportedUserId}`;
+    const reporter =
+      row.reporter?.nickname || row.reporter?.email || `#${row.reporterId}`;
+    reportDetailEl.innerHTML = `
+      <div class="detail-inner">
+        <div class="detail-head">
+          <h2>${escapeHtml(reported)}</h2>
+          ${reportStatusBadge(row.status)}
+        </div>
+        <p class="muted tiny">Report #${row.id} · ${escapeHtml(formatWhen(row.createdAt))}</p>
+        <dl class="detail-grid">
+          <dt>通報者</dt><dd>${escapeHtml(reporter)} (#${row.reporterId})</dd>
+          <dt>対象</dt><dd>${escapeHtml(reported)} (#${row.reportedUserId})</dd>
+          <dt>理由</dt><dd>${escapeHtml(row.reason || '—')}</dd>
+          <dt>文脈</dt><dd>${escapeHtml(row.context || '—')}</dd>
+          <dt>詳細</dt><dd>${escapeHtml(row.details || '—')}</dd>
+          <dt>テーブル</dt><dd>${row.tableId != null ? `#${row.tableId}` : '—'}</dd>
+          <dt>招待</dt><dd>${row.invitationId != null ? `#${row.invitationId}` : '—'}</dd>
+          <dt>メモ</dt><dd>${escapeHtml(row.adminNote || '—')}</dd>
+        </dl>
+        <label class="field">
+          <span>管理者メモ</span>
+          <textarea id="report-note" rows="3">${escapeHtml(row.adminNote || '')}</textarea>
+        </label>
+        <div class="detail-actions">
+          <button type="button" class="btn-soft" data-report-action="reviewed">対応済にする</button>
+          <button type="button" class="btn-ghost" data-report-action="dismissed">却下</button>
+          <button type="button" class="btn-ghost" data-report-action="pending">未対応に戻す</button>
+        </div>
+      </div>
+    `;
+    reportDetailEl.querySelectorAll('[data-report-action]').forEach((btn) => {
+      btn.addEventListener('click', () =>
+        updateReportStatus(id, btn.dataset.reportAction),
+      );
+    });
+  } catch (e) {
+    reportDetailEl.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+  }
+}
+
+async function updateReportStatus(id, status) {
+  try {
+    const note = document.getElementById('report-note')?.value?.trim() || '';
+    await api(`/admin/reports/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, adminNote: note }),
+    });
+    toast('通報を更新しました');
+    await refreshCounts();
+    await loadReports();
+    await openReportDetail(id);
+  } catch (e) {
+    toast(e.message || '更新に失敗しました', 'err');
   }
 }
 

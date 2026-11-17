@@ -25,6 +25,7 @@ const userSchema = new mongoose.Schema(
     jpToEnOn: { type: Boolean, default: undefined },
     enToJpOn: { type: Boolean, default: undefined },
     passedUserIds: { type: [Number], default: [] },
+    blockedUserIds: { type: [Number], default: [] },
     createdAt: { type: String, default: () => new Date().toISOString() },
   },
   { versionKey: false },
@@ -92,6 +93,28 @@ const messageSchema = new mongoose.Schema(
   { versionKey: false },
 );
 
+const reportSchema = new mongoose.Schema(
+  {
+    id: { type: Number, required: true, unique: true, index: true },
+    reporterId: { type: Number, required: true, index: true },
+    reportedUserId: { type: Number, required: true, index: true },
+    reason: { type: String, default: '' },
+    details: { type: String, default: '' },
+    context: { type: String, default: 'profile' },
+    tableId: { type: Number, default: null },
+    invitationId: { type: Number, default: null },
+    status: {
+      type: String,
+      default: 'pending',
+      enum: ['pending', 'reviewed', 'dismissed'],
+    },
+    adminNote: { type: String, default: '' },
+    createdAt: { type: String, default: () => new Date().toISOString() },
+    reviewedAt: { type: String, default: '' },
+  },
+  { versionKey: false },
+);
+
 const counterSchema = new mongoose.Schema(
   {
     _id: { type: String, required: true },
@@ -105,6 +128,7 @@ const Verification = mongoose.model('Verification', verificationSchema);
 const Invitation = mongoose.model('Invitation', invitationSchema);
 const Table = mongoose.model('Table', tableSchema);
 const Message = mongoose.model('Message', messageSchema);
+const Report = mongoose.model('Report', reportSchema);
 const Counter = mongoose.model('Counter', counterSchema);
 
 module.exports = {
@@ -113,5 +137,6 @@ module.exports = {
   Invitation,
   Table,
   Message,
+  Report,
   Counter,
 };

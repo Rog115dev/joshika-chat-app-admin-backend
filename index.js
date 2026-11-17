@@ -10,6 +10,7 @@ const {
   Invitation,
   Table,
   Message,
+  Report,
 } = require('./models');
 const {
   connectMongo,
@@ -166,7 +167,7 @@ async function bestTrustLadderForUser(user) {
 async function publicUser(user) {
   if (!user) return null;
   const plain = stripMongoId(user);
-  const { passwordHash, passedUserIds, ...rest } = plain;
+  const { passwordHash, passedUserIds, blockedUserIds, ...rest } = plain;
   const isVerified =
     String(user.verificationStatus || '').toLowerCase() === 'approved';
   return {
@@ -175,6 +176,45 @@ async function publicUser(user) {
     isVerified,
     trustLadder: await bestTrustLadderForUser(user),
   };
+}
+
+function blockedSetFor(user) {
+  return new Set(
+    (Array.isArray(user?.blockedUserIds) ? user.blockedUserIds : [])
+      .map((n) => Number(n))
+      .filter((n) => Number.isFinite(n)),
+  );
+}
+
+/** True if either user has blocked the other. */
+function isEitherBlocked(a, b) {
+  if (!a || !b) return false;
+  const aId = Number(a.id);
+  const bId = Number(b.id);
+  if (!Number.isFinite(aId) || !Number.isFinite(bId)) return false;
+  return blockedSetFor(a).has(bId) || blockedSetFor(b).has(aId);
+}
+
+async function declinePendingInvitesBetween(userAId, userBId) {
+  const pending = await Invitation.find({
+    status: 'pending',
+    $or: [
+      { fromUserId: userAId, toUserId: userBId },
+      { fromUserId: userBId, toUserId: userAId },
+    ],
+  });
+  for (const inv of pending) {
+    inv.status = 'declined';
+    await inv.save();
+    if (inv.tableId != null) {
+      const table = await Table.findOne({ id: inv.tableId });
+      if (table && table.status === 'pending') {
+        table.status = 'declined';
+        await table.save();
+      }
+    }
+  }
+  return pending.length;
 }
 
 async function authUser(req) {
@@ -355,6 +395,9 @@ function publicProfile(user) {
     bio: user.bio || '',
     verificationStatus: user.verificationStatus || 'pending',
     isVerified,
+    // Language exchange direction for Browse cards / partner matching.
+    jpToEnOn: user.jpToEnOn === true,
+    enToJpOn: user.enToJpOn === true,
   };
 }
 
@@ -523,6 +566,8 @@ async function ensureDemoUsers() {
       lifeStatus: 'working',
       interests: ['Cafe Lover', 'Music', 'Photography', 'Travel', 'Bookworm'],
       bio: 'Looking for a calm Sunday coffee chat and language exchange.',
+      jpToEnOn: true,
+      enToJpOn: false,
       profileImageUrl:
         'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop',
     },
@@ -535,6 +580,8 @@ async function ensureDemoUsers() {
       lifeStatus: 'student',
       interests: ['Anime', 'Manga', 'Arts', 'Cafe Lover', 'Exam Study Buddy'],
       bio: 'Art student who loves slow walks and cozy cafes.',
+      jpToEnOn: true,
+      enToJpOn: true,
       profileImageUrl:
         'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&h=400&fit=crop',
     },
@@ -547,6 +594,8 @@ async function ensureDemoUsers() {
       lifeStatus: 'working',
       interests: ['Fitness', 'Wine Tasting', 'Entrepreneurship', 'Travel', 'Music'],
       bio: 'Weekend explorer. Happy to practice EN ↔ JP over dinner.',
+      jpToEnOn: false,
+      enToJpOn: true,
       profileImageUrl:
         'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&h=400&fit=crop',
     },
@@ -556,10 +605,17 @@ async function ensureDemoUsers() {
   for (const demo of demos) {
     const existing = await findUserByEmail(demo.email);
     if (existing) {
+      let changed = false;
       if (!str(existing.profileImageUrl) && demo.profileImageUrl) {
         existing.profileImageUrl = demo.profileImageUrl;
-        await existing.save();
+        changed = true;
       }
+      if (existing.jpToEnOn !== true && existing.enToJpOn !== true) {
+        existing.jpToEnOn = demo.jpToEnOn === true;
+        existing.enToJpOn = demo.enToJpOn === true;
+        changed = true;
+      }
+      if (changed) await existing.save();
       continue;
     }
     await User.create({
@@ -575,6 +631,8 @@ async function ensureDemoUsers() {
       phoneNumber: '',
       interests: demo.interests,
       bio: demo.bio,
+      jpToEnOn: demo.jpToEnOn === true,
+      enToJpOn: demo.enToJpOn === true,
       verificationStatus: 'approved',
       verificationId: null,
       passedUserIds: [],
@@ -1327,6 +1385,8 @@ app.get('/room/profiles', async (req, res) => {
     }
 
     let rows = await User.find(filter);
+    // Hide anyone I blocked or who blocked me.
+    rows = rows.filter((u) => !isEitherBlocked(me, u));
     if (similarAge && me.age) {
       rows = rows.filter((u) => Math.abs((u.age || 0) - me.age) <= 4);
     }
@@ -1379,6 +1439,199 @@ app.post('/room/pass', async (req, res) => {
   res.json({ ok: true });
 });
 
+const REPORT_REASONS = new Set([
+  'harassment',
+  'inappropriate',
+  'spam',
+  'fake',
+  'underage',
+  'other',
+]);
+
+app.post('/safety/report', async (req, res) => {
+  const me = await requireApprovedUser(req, res);
+  if (!me) return;
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const reportedUserId = Number.parseInt(String(body.reportedUserId || ''), 10);
+    const reason = str(body.reason).toLowerCase() || 'other';
+    const details = str(body.details);
+    const context = str(body.context) || 'profile';
+    const tableIdRaw = body.tableId;
+    const invitationIdRaw = body.invitationId;
+    const tableId =
+      tableIdRaw == null || tableIdRaw === ''
+        ? null
+        : Number.parseInt(String(tableIdRaw), 10);
+    const invitationId =
+      invitationIdRaw == null || invitationIdRaw === ''
+        ? null
+        : Number.parseInt(String(invitationIdRaw), 10);
+
+    if (!Number.isFinite(reportedUserId)) {
+      return res.status(400).json({ error: 'reportedUserId required' });
+    }
+    if (reportedUserId === me.id) {
+      return res.status(400).json({ error: 'Cannot report yourself' });
+    }
+    if (!REPORT_REASONS.has(reason)) {
+      return res.status(400).json({ error: 'Invalid report reason' });
+    }
+    const target = await findUserById(reportedUserId);
+    if (!target) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const report = await Report.create({
+      id: await getNextId('reportId'),
+      reporterId: me.id,
+      reportedUserId,
+      reason,
+      details,
+      context,
+      tableId: Number.isFinite(tableId) ? tableId : null,
+      invitationId: Number.isFinite(invitationId) ? invitationId : null,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    });
+
+    res.status(201).json({
+      ok: true,
+      report: {
+        id: report.id,
+        reportedUserId: report.reportedUserId,
+        reason: report.reason,
+        status: report.status,
+        createdAt: report.createdAt,
+      },
+    });
+  } catch (err) {
+    console.error('safety report failed', err);
+    res.status(500).json({ error: 'Failed to submit report' });
+  }
+});
+
+app.post('/safety/block', async (req, res) => {
+  const me = await requireApprovedUser(req, res);
+  if (!me) return;
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const userId = Number.parseInt(String(body.userId || ''), 10);
+    if (!Number.isFinite(userId)) {
+      return res.status(400).json({ error: 'userId required' });
+    }
+    if (userId === me.id) {
+      return res.status(400).json({ error: 'Cannot block yourself' });
+    }
+    const target = await findUserById(userId);
+    if (!target) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (!Array.isArray(me.blockedUserIds)) me.blockedUserIds = [];
+    if (!me.blockedUserIds.includes(userId)) {
+      me.blockedUserIds.push(userId);
+    }
+    // Also hide from browse via Pass list.
+    if (!Array.isArray(me.passedUserIds)) me.passedUserIds = [];
+    if (!me.passedUserIds.includes(userId)) {
+      me.passedUserIds.push(userId);
+    }
+    await me.save();
+    const declined = await declinePendingInvitesBetween(me.id, userId);
+    res.json({
+      ok: true,
+      blockedUserId: userId,
+      declinedInvitations: declined,
+    });
+  } catch (err) {
+    console.error('safety block failed', err);
+    res.status(500).json({ error: 'Failed to block user' });
+  }
+});
+
+app.post('/safety/unblock', async (req, res) => {
+  const me = await requireApprovedUser(req, res);
+  if (!me) return;
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const userId = Number.parseInt(String(body.userId || ''), 10);
+    if (!Number.isFinite(userId)) {
+      return res.status(400).json({ error: 'userId required' });
+    }
+    if (!Array.isArray(me.blockedUserIds)) me.blockedUserIds = [];
+    me.blockedUserIds = me.blockedUserIds.filter((id) => id !== userId);
+    await me.save();
+    res.json({ ok: true, unblockedUserId: userId });
+  } catch (err) {
+    console.error('safety unblock failed', err);
+    res.status(500).json({ error: 'Failed to unblock user' });
+  }
+});
+
+app.get('/admin/reports', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const status = str(req.query.status) || 'pending';
+    const limit = Math.min(
+      200,
+      Math.max(1, Number.parseInt(String(req.query.limit || '50'), 10) || 50),
+    );
+    const filter = status === 'all' ? {} : { status };
+    const rows = await Report.find(filter).sort({ id: -1 }).limit(limit).lean();
+    const enriched = await Promise.all(
+      rows.map(async (r) => {
+        const reporter = await findUserById(r.reporterId);
+        const reported = await findUserById(r.reportedUserId);
+        return {
+          ...r,
+          reporter: reporter
+            ? {
+                id: reporter.id,
+                email: reporter.email,
+                nickname: reporter.nickname || reporter.name || '',
+              }
+            : null,
+          reportedUser: reported
+            ? {
+                id: reported.id,
+                email: reported.email,
+                nickname: reported.nickname || reported.name || '',
+                verificationStatus: reported.verificationStatus || 'pending',
+              }
+            : null,
+        };
+      }),
+    );
+    res.json(enriched);
+  } catch (err) {
+    console.error('admin reports failed', err);
+    res.status(500).json({ error: 'Failed to load reports' });
+  }
+});
+
+app.patch('/admin/reports/:id', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const id = Number.parseInt(req.params.id, 10);
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const report = await Report.findOne({ id });
+    if (!report) return res.status(404).json({ error: 'Report not found' });
+    const status = str(body.status).toLowerCase();
+    if (status && ['pending', 'reviewed', 'dismissed'].includes(status)) {
+      report.status = status;
+      if (status !== 'pending') {
+        report.reviewedAt = new Date().toISOString();
+      }
+    }
+    if (body.adminNote != null) report.adminNote = str(body.adminNote);
+    await report.save();
+    res.json({ ok: true, report: stripMongoId(report) });
+  } catch (err) {
+    console.error('admin report patch failed', err);
+    res.status(500).json({ error: 'Failed to update report' });
+  }
+});
+
 app.post('/invitations', async (req, res) => {
   const me = await requireApprovedUser(req, res);
   if (!me) return;
@@ -1404,6 +1657,9 @@ app.post('/invitations', async (req, res) => {
       String(toUser.verificationStatus || '').toLowerCase() !== 'approved'
     ) {
       return res.status(404).json({ error: 'User not found' });
+    }
+    if (isEitherBlocked(me, toUser)) {
+      return res.status(403).json({ error: 'Cannot invite a blocked member' });
     }
 
     const existing = await Invitation.findOne({
@@ -1461,8 +1717,16 @@ app.get('/invitations', async (req, res) => {
     box === 'outgoing' ? { fromUserId: me.id } : { toUserId: me.id };
   if (status) filter.status = status;
 
-  const rows = await Invitation.find(filter).sort({ id: -1 });
-  res.json(await Promise.all(rows.map((inv) => invitationPayload(inv))));
+  let rows = await Invitation.find(filter).sort({ id: -1 });
+  // Hide invites involving blocked members.
+  const filtered = [];
+  for (const inv of rows) {
+    const otherId = box === 'outgoing' ? inv.toUserId : inv.fromUserId;
+    const other = await findUserById(otherId);
+    if (other && isEitherBlocked(me, other)) continue;
+    filtered.push(inv);
+  }
+  res.json(await Promise.all(filtered.map((inv) => invitationPayload(inv))));
 });
 
 app.get('/invitations/:id', async (req, res) => {
@@ -1622,7 +1886,15 @@ app.get('/tables', async (req, res) => {
     };
     if (statusFilter != null) filter.status = statusFilter;
 
-    const rows = await Table.find(filter).lean();
+    let rows = await Table.find(filter).lean();
+    const visible = [];
+    for (const t of rows) {
+      const peerId = t.hostUserId === me.id ? t.guestUserId : t.hostUserId;
+      const peer = await findUserById(peerId);
+      if (peer && isEitherBlocked(me, peer)) continue;
+      visible.push(t);
+    }
+    rows = visible;
     const withLast = await Promise.all(
       rows.map(async (t) => {
         const last = await Message.findOne({ tableId: t.id })
@@ -1649,11 +1921,18 @@ app.get('/chats', async (req, res) => {
   const me = await requireApprovedUser(req, res);
   if (!me) return;
   try {
-    const rows = await Table.find({
+    let rows = await Table.find({
       $or: [{ hostUserId: me.id }, { guestUserId: me.id }],
     }).lean();
+    const visible = [];
+    for (const t of rows) {
+      const peerId = t.hostUserId === me.id ? t.guestUserId : t.hostUserId;
+      const peer = await findUserById(peerId);
+      if (peer && isEitherBlocked(me, peer)) continue;
+      visible.push(t);
+    }
     const withLast = await Promise.all(
-      rows.map(async (t) => {
+      visible.map(async (t) => {
         const last = await Message.findOne({ tableId: t.id })
           .sort({ id: -1 })
           .select('id')

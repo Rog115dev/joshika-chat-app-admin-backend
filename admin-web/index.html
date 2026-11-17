@@ -48,6 +48,11 @@
             <span class="nav-label">メンバー</span>
             <span class="nav-sub">Members</span>
           </button>
+          <button type="button" class="nav-item tab" data-tab="reports">
+            <span class="nav-label">通報</span>
+            <span class="nav-sub">Reports</span>
+            <span id="reports-pill" class="nav-pill" hidden>0</span>
+          </button>
         </nav>
 
         <div class="sidebar-stats" id="sidebar-stats" aria-live="polite">
@@ -117,6 +122,33 @@
             </div>
           </article>
         </div>
+
+        <div id="reports-pane" class="pane workspace" hidden>
+          <div id="reports-list-view" class="pane-view list-pane">
+            <div class="filters" role="tablist" aria-label="Report status">
+              <button type="button" data-report-status="pending" class="report-filter active">
+                未対応
+              </button>
+              <button type="button" data-report-status="reviewed" class="report-filter">
+                対応済
+              </button>
+              <button type="button" data-report-status="dismissed" class="report-filter">
+                却下
+              </button>
+              <button type="button" data-report-status="all" class="report-filter">
+                すべて
+              </button>
+            </div>
+            <div id="reports-list" class="list"></div>
+          </div>
+          <article id="report-detail" class="pane-view detail detail-pane">
+            <div class="empty-panel">
+              <div class="empty-icon">⚑</div>
+              <h2>通報を選択</h2>
+              <p class="muted">左から通報を選ぶと、内容の確認とステータス更新ができます。</p>
+            </div>
+          </article>
+        </div>
       </main>
     </section>
   </div>
@@ -124,6 +156,6 @@
   <div id="toast-host" class="toast-host" aria-live="polite"></div>
   <div id="modal-host" class="modal-host" hidden></div>
 
-  <script src="app.js?v=20261114a"></script>
+  <script src="app.js?v=20261117a"></script>
 </body>
 </html>
