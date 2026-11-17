@@ -727,7 +727,7 @@ app.post('/auth/forgot-password', async (req, res) => {
   res.json({ ok: true, sent: true });
 });
 
-/** Step 2: confirm email code + set new password, then user can re-login. */
+/** Step 2: confirm email code + set new password. Keep membership approval. */
 app.post('/auth/reset-password', async (req, res) => {
   try {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
@@ -759,44 +759,16 @@ app.post('/auth/reset-password', async (req, res) => {
       return res.status(404).json({ error: 'Account not found' });
     }
 
+    // Password only — do not change verificationStatus / Verification records.
+    const previousStatus = String(user.verificationStatus || 'pending');
     user.passwordHash = await bcrypt.hash(newPassword, 10);
-    user.verificationStatus = 'pending';
-    if (user.verificationId != null) {
-      const linked = await Verification.findOne({ id: user.verificationId });
-      if (linked) {
-        linked.status = 'pending';
-        linked.adminNote = str(linked.adminNote)
-          ? `${linked.adminNote}\nPassword reset — re-approval required.`
-          : 'Password reset — re-approval required.';
-        await linked.save();
-      }
-    } else {
-      const row = await Verification.create({
-        id: await getNextId('verificationId'),
-        userId: user.id,
-        phoneNumber: user.phoneNumber || '',
-        selfieUrl: '',
-        status: 'pending',
-        submittedAt: new Date().toISOString(),
-        adminNote: 'Password reset — re-approval required.',
-        email: user.email || '',
-        name: user.name || '',
-        nickname: user.nickname || '',
-        profileImageUrl: user.profileImageUrl || '',
-        lifeStatus: user.lifeStatus || '',
-        age: user.age || 0,
-        placeOfLiving: user.placeOfLiving || '',
-        interests: user.interests || [],
-      });
-      user.verificationId = row.id;
-    }
     await user.save();
     clearUserSessions(user.id);
     passwordResetCodes.delete(email);
     res.json({
       ok: true,
-      verificationStatus: 'pending',
-      requiresReapproval: true,
+      verificationStatus: previousStatus,
+      requiresReapproval: false,
     });
   } catch (err) {
     console.error('reset-password failed', err);
