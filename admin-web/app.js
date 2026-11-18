@@ -18,20 +18,18 @@ const usersListEl = document.getElementById('users-list');
 const userDetailEl = document.getElementById('user-detail');
 const reportsListEl = document.getElementById('reports-list');
 const reportDetailEl = document.getElementById('report-detail');
-const reportsListView = document.getElementById('reports-list-view');
+const detailDrawer = document.getElementById('detail-drawer');
+const drawerTitle = document.getElementById('drawer-title');
+const drawerCloseBtn = document.getElementById('drawer-close-btn');
+const drawerScrim = document.getElementById('drawer-scrim');
+const verificationsStage = document.getElementById('verifications-stage');
+const usersStage = document.getElementById('users-stage');
+const reportsStage = document.getElementById('reports-stage');
 const loginError = document.getElementById('login-error');
 const dashTitle = document.getElementById('dash-title');
 const dashSubtitle = document.getElementById('dash-subtitle');
-const backBtn = document.getElementById('back-btn');
-const verificationsListView = document.getElementById('verifications-list-view');
-const usersListView = document.getElementById('users-list-view');
 const toastHost = document.getElementById('toast-host');
 const modalHost = document.getElementById('modal-host');
-
-/** Always use one full-width content pane (list OR detail), never a cramped 3-column split. */
-function isStackedWorkspace() {
-  return true;
-}
 
 function authHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -351,64 +349,47 @@ function statusBadge(status) {
   return `<span class="badge ${cls}">${escapeHtml(label)}</span>`;
 }
 
-function syncWorkspacePanes() {
-  const stacked = isStackedWorkspace();
-  const verOpen = activeTab === 'verifications' && selectedId != null;
-  const userOpen = activeTab === 'users' && selectedUserId != null;
-  const reportOpen = activeTab === 'reports' && selectedReportId != null;
+function openDetailDrawer(kind, title) {
+  if (!detailDrawer) return;
+  if (detailEl) detailEl.hidden = kind !== 'verification';
+  if (userDetailEl) userDetailEl.hidden = kind !== 'user';
+  if (reportDetailEl) reportDetailEl.hidden = kind !== 'report';
+  if (drawerTitle) drawerTitle.textContent = title || '詳細';
+  detailDrawer.hidden = false;
+  detailDrawer.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('drawer-open');
+}
 
-  if (verificationsListView) {
-    verificationsListView.classList.toggle(
-      'collapsed-mobile',
-      stacked && verOpen,
-    );
+function closeDetailDrawer() {
+  selectedId = null;
+  selectedUserId = null;
+  selectedReportId = null;
+  document.querySelectorAll('.card.selected').forEach((c) => c.classList.remove('selected'));
+  if (detailDrawer) {
+    detailDrawer.hidden = true;
+    detailDrawer.setAttribute('aria-hidden', 'true');
   }
   if (detailEl) {
-    detailEl.classList.toggle(
-      'collapsed-mobile',
-      stacked && !verOpen && activeTab === 'verifications',
-    );
-  }
-  if (usersListView) {
-    usersListView.classList.toggle('collapsed-mobile', stacked && userOpen);
+    detailEl.hidden = true;
+    detailEl.innerHTML = '';
   }
   if (userDetailEl) {
-    userDetailEl.classList.toggle(
-      'collapsed-mobile',
-      stacked && !userOpen && activeTab === 'users',
-    );
-  }
-  if (reportsListView) {
-    reportsListView.classList.toggle('collapsed-mobile', stacked && reportOpen);
+    userDetailEl.hidden = true;
+    userDetailEl.innerHTML = '';
   }
   if (reportDetailEl) {
-    reportDetailEl.classList.toggle(
-      'collapsed-mobile',
-      stacked && !reportOpen && activeTab === 'reports',
-    );
+    reportDetailEl.hidden = true;
+    reportDetailEl.innerHTML = '';
   }
-  if (backBtn) {
-    backBtn.hidden = !(stacked && (verOpen || userOpen || reportOpen));
-  }
+  document.body.classList.remove('drawer-open');
 }
 
 function syncMobilePanes() {
-  syncWorkspacePanes();
+  // Kept for older call sites; workspace no longer swaps list/detail panes.
 }
 
 function showListMode() {
-  if (activeTab === 'users') {
-    selectedUserId = null;
-    renderUserEmpty();
-  } else if (activeTab === 'reports') {
-    selectedReportId = null;
-    renderReportEmpty();
-  } else {
-    selectedId = null;
-    renderVerificationEmpty();
-  }
-  document.querySelectorAll('.card.selected').forEach((c) => c.classList.remove('selected'));
-  syncMobilePanes();
+  closeDetailDrawer();
   if (dashSubtitle) {
     dashSubtitle.textContent =
       activeTab === 'users'
@@ -420,36 +401,15 @@ function showListMode() {
 }
 
 function renderVerificationEmpty() {
-  if (!detailEl) return;
-  detailEl.innerHTML = `
-    <div class="empty-panel">
-      <div class="empty-icon">✓</div>
-      <h2>提出を選択</h2>
-      <p class="muted">リストから本人確認を選ぶと、セルフィーとプロフィールを確認できます。</p>
-    </div>
-  `;
+  closeDetailDrawer();
 }
 
 function renderUserEmpty() {
-  if (!userDetailEl) return;
-  userDetailEl.innerHTML = `
-    <div class="empty-panel">
-      <div class="empty-icon">◎</div>
-      <h2>メンバーを選択</h2>
-      <p class="muted">リストからメンバーを選ぶと、プロフィール編集やパスワードリセットができます。</p>
-    </div>
-  `;
+  closeDetailDrawer();
 }
 
 function renderReportEmpty() {
-  if (!reportDetailEl) return;
-  reportDetailEl.innerHTML = `
-    <div class="empty-panel">
-      <div class="empty-icon">⚑</div>
-      <h2>通報を選択</h2>
-      <p class="muted">リストから通報を選ぶと、内容の確認とステータス更新ができます。</p>
-    </div>
-  `;
+  closeDetailDrawer();
 }
 
 function fillCardBody(card, title, lines, badgesHtml) {
@@ -468,10 +428,9 @@ function setTab(tab) {
   document.querySelectorAll('.tab').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   });
-  document.getElementById('verifications-pane').hidden = tab !== 'verifications';
-  document.getElementById('users-pane').hidden = tab !== 'users';
-  const reportsPane = document.getElementById('reports-pane');
-  if (reportsPane) reportsPane.hidden = tab !== 'reports';
+  if (verificationsStage) verificationsStage.hidden = tab !== 'verifications';
+  if (usersStage) usersStage.hidden = tab !== 'users';
+  if (reportsStage) reportsStage.hidden = tab !== 'reports';
   showListMode();
   if (tab === 'verifications') {
     dashTitle.textContent = '本人確認';
@@ -551,11 +510,12 @@ document.getElementById('logout-btn')?.addEventListener('click', () => {
   toast('ログアウトしました');
 });
 
-backBtn?.addEventListener('click', () => {
-  showListMode();
-  if (activeTab === 'users') loadUsers();
-  else if (activeTab === 'reports') loadReports();
-  else loadList();
+drawerCloseBtn?.addEventListener('click', () => showListMode());
+drawerScrim?.addEventListener('click', () => showListMode());
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && detailDrawer && !detailDrawer.hidden) {
+    showListMode();
+  }
 });
 
 document.getElementById('refresh-btn')?.addEventListener('click', async () => {
@@ -657,8 +617,10 @@ function markSelectedCard(listRoot, id) {
 
 async function openDetail(id) {
   selectedId = id;
+  selectedUserId = null;
+  selectedReportId = null;
   markSelectedCard(listEl, id);
-  syncMobilePanes();
+  openDetailDrawer('verification', '本人確認の詳細');
   detailEl.innerHTML = '<div class="detail-inner"><p class="muted">読み込み中…</p></div>';
   if (dashSubtitle) dashSubtitle.textContent = 'セルフィーとプロフィールを確認してください';
   try {
@@ -825,8 +787,10 @@ async function loadUsers() {
 
 async function openUserDetail(id) {
   selectedUserId = id;
+  selectedId = null;
+  selectedReportId = null;
   markSelectedCard(usersListEl, id);
-  syncMobilePanes();
+  openDetailDrawer('user', 'メンバー詳細');
   userDetailEl.innerHTML = '<div class="detail-inner"><p class="muted">読み込み中…</p></div>';
   if (dashSubtitle) dashSubtitle.textContent = 'プロフィールの編集・パスワード管理';
   try {
@@ -1068,16 +1032,12 @@ async function loadReports() {
 
 async function openReportDetail(id, cached) {
   selectedReportId = id;
-  syncMobilePanes();
-  document
-    .querySelectorAll('#reports-list .card')
-    .forEach((c) => c.classList.remove('selected'));
-  const cards = reportsListEl?.querySelectorAll('.card') || [];
-  cards.forEach((c, i) => {
-    // selection restyled on reload; ignore index match
-  });
+  selectedId = null;
+  selectedUserId = null;
+  markSelectedCard(reportsListEl, id);
+  openDetailDrawer('report', '通報の詳細');
   if (!reportDetailEl) return;
-  reportDetailEl.innerHTML = '<p class="muted">読み込み中…</p>';
+  reportDetailEl.innerHTML = '<div class="detail-inner"><p class="muted">読み込み中…</p></div>';
   try {
     let row = cached;
     if (!row || row.id !== id) {

@@ -284,21 +284,20 @@ label {
   margin-top: 2px;
 }
 
-/* Workspace: one full-width pane at a time (list OR detail) */
-.pane.workspace {
+/* One right workspace: stage list + optional detail drawer */
+.workspace {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: 1fr;
-  background: transparent;
-  border: none;
-  border-radius: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
-  gap: 0;
 }
 
+.stage.pane-view,
 .pane-view {
   min-height: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
   background: var(--panel);
@@ -306,6 +305,85 @@ label {
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: var(--shadow);
+  padding: 14px;
+}
+
+.stage-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.stage-panel[hidden] {
+  display: none !important;
+}
+
+.detail-drawer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.detail-drawer[hidden] {
+  display: none !important;
+}
+
+.drawer-scrim {
+  position: absolute;
+  inset: 0;
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: rgba(28, 20, 18, 0.28);
+  cursor: pointer;
+}
+
+.drawer-sheet {
+  position: relative;
+  z-index: 1;
+  width: min(560px, 100%);
+  height: 100%;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  box-shadow: -18px 0 40px rgba(36, 28, 26, 0.12);
+  display: flex;
+  flex-direction: column;
+  animation: drawer-in 0.18s ease;
+}
+
+@keyframes drawer-in {
+  from { transform: translateX(18px); opacity: 0.6; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.drawer-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.drawer-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.drawer-detail[hidden] {
+  display: none !important;
 }
 
 .list-pane {
@@ -839,11 +917,6 @@ textarea {
   margin: 12px 0 16px;
 }
 
-.list-pane.collapsed-mobile,
-.detail-pane.collapsed-mobile {
-  display: none !important;
-}
-
 @media (max-width: 980px) {
   .selfie-stage,
   .review-layout {
@@ -853,6 +926,10 @@ textarea {
   .selfie-frame {
     max-width: 280px;
     margin: 0 auto;
+    width: 100%;
+  }
+
+  .drawer-sheet {
     width: 100%;
   }
 }
@@ -900,7 +977,7 @@ textarea {
     min-height: 70vh;
   }
 
-  .pane.workspace {
+  .workspace {
     min-height: 65vh;
   }
 }

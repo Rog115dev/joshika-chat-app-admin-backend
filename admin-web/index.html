@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20261118a" />
+  <link rel="stylesheet" href="styles.css?v=20261118b" />
 </head>
 <body>
   <div id="app">
@@ -74,7 +74,6 @@
 
       <main class="content">
         <header class="content-head">
-          <button type="button" id="back-btn" class="btn-ghost back-btn" hidden>← 戻る</button>
           <div class="head-copy">
             <h1 id="dash-title">本人確認</h1>
             <p class="muted tiny" id="dash-subtitle">提出された本人確認を確認・承認します</p>
@@ -82,72 +81,65 @@
           <div class="head-actions" id="head-actions"></div>
         </header>
 
-        <div id="verifications-pane" class="pane workspace">
-          <div id="verifications-list-view" class="pane-view list-pane">
-            <div class="filters" role="tablist" aria-label="Verification status">
-              <button type="button" data-status="pending" class="filter active">
-                未対応 <span class="filter-count" id="count-pending"></span>
-              </button>
-              <button type="button" data-status="approved" class="filter">
-                承認済 <span class="filter-count" id="count-approved"></span>
-              </button>
-              <button type="button" data-status="rejected" class="filter">
-                却下 <span class="filter-count" id="count-rejected"></span>
-              </button>
+        <!-- One right workspace: sidebar only swaps the stage content -->
+        <div id="workspace" class="workspace">
+          <section id="stage" class="stage pane-view" aria-live="polite">
+            <div id="verifications-stage" class="stage-panel">
+              <div class="filters" role="tablist" aria-label="Verification status">
+                <button type="button" data-status="pending" class="filter active">
+                  未対応 <span class="filter-count" id="count-pending"></span>
+                </button>
+                <button type="button" data-status="approved" class="filter">
+                  承認済 <span class="filter-count" id="count-approved"></span>
+                </button>
+                <button type="button" data-status="rejected" class="filter">
+                  却下 <span class="filter-count" id="count-rejected"></span>
+                </button>
+              </div>
+              <div id="list" class="list"></div>
             </div>
-            <div id="list" class="list"></div>
-          </div>
-          <article id="detail" class="pane-view detail detail-pane">
-            <div class="empty-panel">
-              <div class="empty-icon">✓</div>
-              <h2>提出を選択</h2>
-              <p class="muted">リストから本人確認を選ぶと、セルフィーとプロフィールを確認できます。</p>
-            </div>
-          </article>
-        </div>
 
-        <div id="users-pane" class="pane workspace" hidden>
-          <div id="users-list-view" class="pane-view list-pane">
-            <div class="users-toolbar">
-              <input type="search" id="user-search" placeholder="名前・メール・電話で検索…" />
-              <button type="button" id="user-search-btn" class="btn-soft">検索</button>
+            <div id="users-stage" class="stage-panel" hidden>
+              <div class="users-toolbar">
+                <input type="search" id="user-search" placeholder="名前・メール・電話で検索…" />
+                <button type="button" id="user-search-btn" class="btn-soft">検索</button>
+              </div>
+              <div id="users-list" class="list"></div>
             </div>
-            <div id="users-list" class="list"></div>
-          </div>
-          <article id="user-detail" class="pane-view detail detail-pane">
-            <div class="empty-panel">
-              <div class="empty-icon">◎</div>
-              <h2>メンバーを選択</h2>
-              <p class="muted">リストからメンバーを選ぶと、プロフィール編集やパスワードリセットができます。</p>
-            </div>
-          </article>
-        </div>
 
-        <div id="reports-pane" class="pane workspace" hidden>
-          <div id="reports-list-view" class="pane-view list-pane">
-            <div class="filters" role="tablist" aria-label="Report status">
-              <button type="button" data-report-status="pending" class="report-filter active">
-                未対応
-              </button>
-              <button type="button" data-report-status="reviewed" class="report-filter">
-                対応済
-              </button>
-              <button type="button" data-report-status="dismissed" class="report-filter">
-                却下
-              </button>
-              <button type="button" data-report-status="all" class="report-filter">
-                すべて
-              </button>
+            <div id="reports-stage" class="stage-panel" hidden>
+              <div class="filters" role="tablist" aria-label="Report status">
+                <button type="button" data-report-status="pending" class="report-filter active">
+                  未対応
+                </button>
+                <button type="button" data-report-status="reviewed" class="report-filter">
+                  対応済
+                </button>
+                <button type="button" data-report-status="dismissed" class="report-filter">
+                  却下
+                </button>
+                <button type="button" data-report-status="all" class="report-filter">
+                  すべて
+                </button>
+              </div>
+              <div id="reports-list" class="list"></div>
             </div>
-            <div id="reports-list" class="list"></div>
-          </div>
-          <article id="report-detail" class="pane-view detail detail-pane">
-            <div class="empty-panel">
-              <div class="empty-icon">⚑</div>
-              <h2>通報を選択</h2>
-              <p class="muted">リストから通報を選ぶと、内容の確認とステータス更新ができます。</p>
+          </section>
+
+          <aside id="detail-drawer" class="detail-drawer" hidden aria-hidden="true">
+            <button type="button" class="drawer-scrim" id="drawer-scrim" aria-label="Close detail"></button>
+            <div class="drawer-sheet" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+              <div class="drawer-toolbar">
+                <h2 id="drawer-title" class="drawer-title">詳細</h2>
+                <button type="button" id="drawer-close-btn" class="btn-ghost">閉じる</button>
+              </div>
+              <div class="drawer-body">
+                <article id="detail" class="detail drawer-detail" hidden></article>
+                <article id="user-detail" class="detail drawer-detail" hidden></article>
+                <article id="report-detail" class="detail drawer-detail" hidden></article>
+              </div>
             </div>
-          </article>
+          </aside>
         </div>
       </main>
     </section>
@@ -156,6 +148,6 @@
   <div id="toast-host" class="toast-host" aria-live="polite"></div>
   <div id="modal-host" class="modal-host" hidden></div>
 
-  <script src="app.js?v=20261118a"></script>
+  <script src="app.js?v=20261118b"></script>
 </body>
 </html>
