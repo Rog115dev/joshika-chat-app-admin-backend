@@ -753,7 +753,10 @@ app.post('/auth/forgot-password', async (req, res) => {
 
   const user = await findUserByEmail(email);
   if (!user) {
-    return res.json({ ok: true, sent: true });
+    return res.status(404).json({
+      error: 'This email is not registered',
+      code: 'EMAIL_NOT_REGISTERED',
+    });
   }
 
   if (!RESEND_API_KEY) {

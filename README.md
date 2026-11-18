@@ -248,7 +248,7 @@ Default credentials（本番では変更）:
 - `POST /auth/register` — アカウント作成  
 - `POST /auth/login` — `{ token, user }` を返す  
 - `GET /auth/me` — Bearer ユーザートークン  
-- `POST /auth/forgot-password` — `{ email }` → Resend で 6 桁コード送信  
+- `POST /auth/forgot-password` — `{ email }` → Resend で 6 桁コード送信。未登録メールは `404` (`EMAIL_NOT_REGISTERED`)
 - `POST /auth/reset-password` — `{ email, code, newPassword }`
 
 キー未設定時、`/auth/forgot-password` は HTTP 503 を返します。

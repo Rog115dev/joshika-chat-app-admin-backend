@@ -28,8 +28,9 @@ const usersListView = document.getElementById('users-list-view');
 const toastHost = document.getElementById('toast-host');
 const modalHost = document.getElementById('modal-host');
 
-function isMobileLayout() {
-  return window.matchMedia('(max-width: 980px)').matches;
+/** Always use one full-width content pane (list OR detail), never a cramped 3-column split. */
+function isStackedWorkspace() {
+  return true;
 }
 
 function authHeaders() {
@@ -350,8 +351,8 @@ function statusBadge(status) {
   return `<span class="badge ${cls}">${escapeHtml(label)}</span>`;
 }
 
-function syncMobilePanes() {
-  const mobile = isMobileLayout();
+function syncWorkspacePanes() {
+  const stacked = isStackedWorkspace();
   const verOpen = activeTab === 'verifications' && selectedId != null;
   const userOpen = activeTab === 'users' && selectedUserId != null;
   const reportOpen = activeTab === 'reports' && selectedReportId != null;
@@ -359,33 +360,40 @@ function syncMobilePanes() {
   if (verificationsListView) {
     verificationsListView.classList.toggle(
       'collapsed-mobile',
-      mobile && verOpen,
+      stacked && verOpen,
     );
   }
   if (detailEl) {
-    detailEl.classList.toggle('collapsed-mobile', mobile && !verOpen && activeTab === 'verifications');
+    detailEl.classList.toggle(
+      'collapsed-mobile',
+      stacked && !verOpen && activeTab === 'verifications',
+    );
   }
   if (usersListView) {
-    usersListView.classList.toggle('collapsed-mobile', mobile && userOpen);
+    usersListView.classList.toggle('collapsed-mobile', stacked && userOpen);
   }
   if (userDetailEl) {
     userDetailEl.classList.toggle(
       'collapsed-mobile',
-      mobile && !userOpen && activeTab === 'users',
+      stacked && !userOpen && activeTab === 'users',
     );
   }
   if (reportsListView) {
-    reportsListView.classList.toggle('collapsed-mobile', mobile && reportOpen);
+    reportsListView.classList.toggle('collapsed-mobile', stacked && reportOpen);
   }
   if (reportDetailEl) {
     reportDetailEl.classList.toggle(
       'collapsed-mobile',
-      mobile && !reportOpen && activeTab === 'reports',
+      stacked && !reportOpen && activeTab === 'reports',
     );
   }
   if (backBtn) {
-    backBtn.hidden = !(mobile && (verOpen || userOpen || reportOpen));
+    backBtn.hidden = !(stacked && (verOpen || userOpen || reportOpen));
   }
+}
+
+function syncMobilePanes() {
+  syncWorkspacePanes();
 }
 
 function showListMode() {
@@ -417,7 +425,7 @@ function renderVerificationEmpty() {
     <div class="empty-panel">
       <div class="empty-icon">✓</div>
       <h2>提出を選択</h2>
-      <p class="muted">左のリストから本人確認を選ぶと、セルフィーとプロフィールを確認できます。</p>
+      <p class="muted">リストから本人確認を選ぶと、セルフィーとプロフィールを確認できます。</p>
     </div>
   `;
 }
@@ -428,7 +436,7 @@ function renderUserEmpty() {
     <div class="empty-panel">
       <div class="empty-icon">◎</div>
       <h2>メンバーを選択</h2>
-      <p class="muted">左からメンバーを選ぶと、プロフィール編集やパスワードリセットができます。</p>
+      <p class="muted">リストからメンバーを選ぶと、プロフィール編集やパスワードリセットができます。</p>
     </div>
   `;
 }
@@ -439,7 +447,7 @@ function renderReportEmpty() {
     <div class="empty-panel">
       <div class="empty-icon">⚑</div>
       <h2>通報を選択</h2>
-      <p class="muted">左から通報を選ぶと、内容の確認とステータス更新ができます。</p>
+      <p class="muted">リストから通報を選ぶと、内容の確認とステータス更新ができます。</p>
     </div>
   `;
 }
@@ -662,7 +670,7 @@ async function openDetail(id) {
     const canDecide = String(row.status).toLowerCase() === 'pending';
 
     detailEl.innerHTML = `
-      <div class="detail-inner">
+      <div class="detail-inner detail-review">
         <div class="detail-hero">
           ${
             displayAvatarUrl(avatarSrc(row))
@@ -682,8 +690,8 @@ async function openDetail(id) {
             : ''
         }
 
-        <div class="selfie-stage">
-          <div>
+        <div class="review-layout">
+          <div class="review-photo">
             <div class="selfie-frame">
               ${
                 photoUrl
@@ -693,8 +701,7 @@ async function openDetail(id) {
             </div>
             <p class="selfie-caption">提出セルフィー / Submitted selfie</p>
           </div>
-          <div class="detail-section" style="margin:0">
-            <h3>プロフィール</h3>
+          <div class="review-body">
             <dl>
               <dt>メール</dt><dd>${escapeHtml(row.email || '—')}</dd>
               <dt>ニックネーム</dt><dd>${escapeHtml(row.nickname || '—')}</dd>
@@ -705,14 +712,10 @@ async function openDetail(id) {
               <dt>居住地</dt><dd>${escapeHtml(row.placeOfLiving || '—')}</dd>
               <dt>興味</dt><dd>${escapeHtml(interests || '—')}</dd>
             </dl>
+            <label class="note-field">メモ（任意）
+              <textarea id="admin-note" placeholder="例: セルフィー鮮明、承認">${escapeHtml(row.adminNote || '')}</textarea>
+            </label>
           </div>
-        </div>
-
-        <div class="detail-section">
-          <h3>管理者メモ</h3>
-          <label>メモ（任意）
-            <textarea id="admin-note" placeholder="例: セルフィー鮮明、承認">${escapeHtml(row.adminNote || '')}</textarea>
-          </label>
         </div>
 
         <div class="actions">
@@ -835,7 +838,7 @@ async function openUserDetail(id) {
     const displayImg = displayAvatarUrl(img);
     const name = displayName(user);
     userDetailEl.innerHTML = `
-      <div class="detail-inner">
+      <div class="detail-inner detail-review">
         <div class="detail-hero">
           ${
             displayImg
@@ -848,36 +851,33 @@ async function openUserDetail(id) {
             <div class="card-foot" style="margin-top:8px">${statusBadge(status)}<span class="badge badge-id">#${user.id}</span></div>
           </div>
         </div>
-        <div class="detail-section">
-          <h3>プロフィール編集</h3>
-          <div class="form-grid">
-            <label class="full">アバター URL
-              <input id="u-avatar" type="text" value="${escapeHtml(user.profileImageUrl || '')}" placeholder="https://…" />
-              <span id="u-avatar-hint" class="field-hint error" hidden></span>
-            </label>
-            <label>メール<input id="u-email" type="email" value="${escapeHtml(user.email || '')}" /></label>
-            <label>ニックネーム<input id="u-nickname" value="${escapeHtml(user.nickname || '')}" /></label>
-            <label>氏名<input id="u-name" value="${escapeHtml(user.name || '')}" /></label>
-            <label>電話<input id="u-phone" value="${escapeHtml(user.phoneNumber || '')}" /></label>
-            <label>年齢<input id="u-age" type="number" min="0" value="${escapeHtml(user.age || 0)}" /></label>
-            <label>ライフステータス
-              <select id="u-life">
-                <option value="student" ${user.lifeStatus === 'student' ? 'selected' : ''}>student</option>
-                <option value="working" ${user.lifeStatus === 'working' ? 'selected' : ''}>working</option>
-                <option value="other" ${!['student', 'working'].includes(user.lifeStatus) ? 'selected' : ''}>other</option>
-              </select>
-            </label>
-            <label class="full">居住地<input id="u-place" value="${escapeHtml(user.placeOfLiving || '')}" /></label>
-            <label class="full">興味（カンマ区切り）<input id="u-interests" value="${escapeHtml(interests)}" /></label>
-            <label class="full">自己紹介<textarea id="u-bio" placeholder="短い紹介文">${escapeHtml(user.bio || '')}</textarea></label>
-            <label>本人確認ステータス
-              <select id="u-status">
-                <option value="pending" ${status === 'pending' ? 'selected' : ''}>pending（未対応）</option>
-                <option value="approved" ${status === 'approved' ? 'selected' : ''}>approved（承認）</option>
-                <option value="rejected" ${status === 'rejected' ? 'selected' : ''}>rejected（却下）</option>
-              </select>
-            </label>
-          </div>
+        <div class="form-grid">
+          <label class="full">アバター URL
+            <input id="u-avatar" type="text" value="${escapeHtml(user.profileImageUrl || '')}" placeholder="https://…" />
+            <span id="u-avatar-hint" class="field-hint error" hidden></span>
+          </label>
+          <label>メール<input id="u-email" type="email" value="${escapeHtml(user.email || '')}" /></label>
+          <label>ニックネーム<input id="u-nickname" value="${escapeHtml(user.nickname || '')}" /></label>
+          <label>氏名<input id="u-name" value="${escapeHtml(user.name || '')}" /></label>
+          <label>電話<input id="u-phone" value="${escapeHtml(user.phoneNumber || '')}" /></label>
+          <label>年齢<input id="u-age" type="number" min="0" value="${escapeHtml(user.age || 0)}" /></label>
+          <label>ライフステータス
+            <select id="u-life">
+              <option value="student" ${user.lifeStatus === 'student' ? 'selected' : ''}>student</option>
+              <option value="working" ${user.lifeStatus === 'working' ? 'selected' : ''}>working</option>
+              <option value="other" ${!['student', 'working'].includes(user.lifeStatus) ? 'selected' : ''}>other</option>
+            </select>
+          </label>
+          <label class="full">居住地<input id="u-place" value="${escapeHtml(user.placeOfLiving || '')}" /></label>
+          <label class="full">興味（カンマ区切り）<input id="u-interests" value="${escapeHtml(interests)}" /></label>
+          <label class="full">自己紹介<textarea id="u-bio" placeholder="短い紹介文">${escapeHtml(user.bio || '')}</textarea></label>
+          <label>本人確認ステータス
+            <select id="u-status">
+              <option value="pending" ${status === 'pending' ? 'selected' : ''}>pending（未対応）</option>
+              <option value="approved" ${status === 'approved' ? 'selected' : ''}>approved（承認）</option>
+              <option value="rejected" ${status === 'rejected' ? 'selected' : ''}>rejected（却下）</option>
+            </select>
+          </label>
         </div>
         <p id="user-msg" class="success" hidden></p>
         <p id="user-err" class="error" hidden></p>
@@ -1097,13 +1097,15 @@ async function openReportDetail(id, cached) {
     const reporter =
       row.reporter?.nickname || row.reporter?.email || `#${row.reporterId}`;
     reportDetailEl.innerHTML = `
-      <div class="detail-inner">
-        <div class="detail-head">
-          <h2>${escapeHtml(reported)}</h2>
-          ${reportStatusBadge(row.status)}
+      <div class="detail-inner detail-review">
+        <div class="detail-hero">
+          <div class="copy">
+            <h2>${escapeHtml(reported)}</h2>
+            <p class="muted tiny">Report #${row.id} · ${escapeHtml(formatWhen(row.createdAt))}</p>
+            <div class="card-foot" style="margin-top:8px">${reportStatusBadge(row.status)}</div>
+          </div>
         </div>
-        <p class="muted tiny">Report #${row.id} · ${escapeHtml(formatWhen(row.createdAt))}</p>
-        <dl class="detail-grid">
+        <dl>
           <dt>通報者</dt><dd>${escapeHtml(reporter)} (#${row.reporterId})</dd>
           <dt>対象</dt><dd>${escapeHtml(reported)} (#${row.reportedUserId})</dd>
           <dt>理由</dt><dd>${escapeHtml(row.reason || '—')}</dd>
@@ -1111,13 +1113,11 @@ async function openReportDetail(id, cached) {
           <dt>詳細</dt><dd>${escapeHtml(row.details || '—')}</dd>
           <dt>テーブル</dt><dd>${row.tableId != null ? `#${row.tableId}` : '—'}</dd>
           <dt>招待</dt><dd>${row.invitationId != null ? `#${row.invitationId}` : '—'}</dd>
-          <dt>メモ</dt><dd>${escapeHtml(row.adminNote || '—')}</dd>
         </dl>
-        <label class="field">
-          <span>管理者メモ</span>
+        <label class="note-field">管理者メモ
           <textarea id="report-note" rows="3">${escapeHtml(row.adminNote || '')}</textarea>
         </label>
-        <div class="detail-actions">
+        <div class="actions">
           <button type="button" class="btn-soft" data-report-action="reviewed">対応済にする</button>
           <button type="button" class="btn-ghost" data-report-action="dismissed">却下</button>
           <button type="button" class="btn-ghost" data-report-action="pending">未対応に戻す</button>
