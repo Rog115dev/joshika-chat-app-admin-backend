@@ -1377,6 +1377,8 @@ app.get('/room/profiles', async (req, res) => {
     const passed = new Set(me.passedUserIds || []);
     const similarAge = String(req.query.similarAge || '') === '1';
     const nearby = String(req.query.nearby || '') === '1';
+    const jpToEn = String(req.query.jpToEn || '') === '1';
+    const enToJp = String(req.query.enToJp || '') === '1';
     const interest = str(req.query.interest);
 
     const filter = {
@@ -1399,6 +1401,17 @@ app.get('/room/profiles', async (req, res) => {
       rows = rows.filter((u) =>
         String(u.placeOfLiving || '').toLowerCase().includes(token),
       );
+    }
+    // Language direction: keep peers who share / complement the selected direction(s).
+    if (jpToEn || enToJp) {
+      rows = rows.filter((u) => {
+        const peerJpToEn = u.jpToEnOn === true;
+        const peerEnToJp = u.enToJpOn === true;
+        if (!peerJpToEn && !peerEnToJp) return false;
+        if (jpToEn && (peerJpToEn || peerEnToJp)) return true;
+        if (enToJp && (peerJpToEn || peerEnToJp)) return true;
+        return false;
+      });
     }
     if (interest) {
       rows = rows.filter((u) =>
