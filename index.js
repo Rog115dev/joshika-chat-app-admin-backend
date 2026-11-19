@@ -405,6 +405,8 @@ async function publicProfileAsync(user) {
   if (!user) return null;
   const base = publicProfile(user);
   base.profileImageUrl = await effectiveProfileImageUrl(user);
+  // Same Trust Ladder as Profile Expanded — needed on Browse → peer Invite screen.
+  base.trustLadder = await bestTrustLadderForUser(user);
   return base;
 }
 
