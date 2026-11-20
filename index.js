@@ -11,11 +11,11 @@ const {
   Table,
   Message,
   Report,
+  Counter,
 } = require('./models');
 const {
   connectMongo,
   getNextId,
-  migrateFromJsonIfEmpty,
   syncCountersFromData,
   stripMongoId,
 } = require('./db');
@@ -62,6 +62,11 @@ const RESEND_FROM_EMAIL =
   strEnv('RESEND_FROM_EMAIL') || 'Joshikai <onboarding@resend.dev>';
 const MONGODB_URI =
   strEnv('MONGODB_URI') || 'mongodb://127.0.0.1:27017/joshikai';
+const BACKUP_DIR = path.join(__dirname, 'backup');
+/** AES key material — prefer BACKUP_SECRET; falls back to admin password. */
+const BACKUP_SECRET =
+  strEnv('BACKUP_SECRET') || ADMIN_PASSWORD || 'joshikai-backup-key';
+const BACKUP_MAGIC = Buffer.from('JKBAK1');
 
 /** @type {Map<string, number>} */
 const userSessions = new Map();
@@ -69,6 +74,306 @@ const userSessions = new Map();
 const adminSessions = new Map();
 /** email -> { code, expiresAt } for password reset */
 const passwordResetCodes = new Map();
+
+function ensureBackupDir() {
+  if (!fs.existsSync(BACKUP_DIR)) {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  }
+}
+
+function backupFilenameFor(iso) {
+  const stamp = new Date(iso).toISOString().replace(/[:.]/g, '-');
+  // No extension — opaque binary, not opened by normal apps
+  return `joshikai-backup-${stamp}`;
+}
+
+/** Extensionless backup names only (blocks .json / path tricks). */
+function isBackupFilename(name) {
+  const base = path.basename(String(name || ''));
+  if (!base || base === '.gitkeep' || base.startsWith('.')) return false;
+  if (base.includes('.') || base.includes('/') || base.includes('\\')) return false;
+  return true;
+}
+
+/** Turn an uploaded filename into a safe extensionless backup name. */
+function sanitizeBackupUploadName(rawName, backedUpAt) {
+  let base = path.basename(String(rawName || '').trim());
+  while (/\.[A-Za-z0-9]{1,10}$/.test(base)) {
+    base = base.replace(/\.[A-Za-z0-9]{1,10}$/, '');
+  }
+  base = base
+    .replace(/[^\w\-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (isBackupFilename(base)) return base;
+  return backupFilenameFor(backedUpAt || new Date().toISOString());
+}
+
+function uniqueBackupFilename(preferredName) {
+  let name = preferredName;
+  let full = path.join(BACKUP_DIR, name);
+  if (!fs.existsSync(full)) return { filename: name, full };
+  let i = 2;
+  while (i < 1000) {
+    name = `${preferredName}-${i}`;
+    full = path.join(BACKUP_DIR, name);
+    if (!fs.existsSync(full)) return { filename: name, full };
+    i += 1;
+  }
+  name = `${preferredName}-${Date.now()}`;
+  return { filename: name, full: path.join(BACKUP_DIR, name) };
+}
+
+/** Validate encrypted backup bytes; returns decrypted payload or throws. */
+function validateEncryptedBackupBuffer(buf) {
+  if (!Buffer.isBuffer(buf) || !buf.length) {
+    throw new Error('empty');
+  }
+  if (!hasBackupMagic(buf)) {
+    throw new Error('magic');
+  }
+  const data = decryptBackupBuffer(buf);
+  if (!data || typeof data !== 'object' || !Array.isArray(data.users)) {
+    throw new Error('payload');
+  }
+  return data;
+}
+
+/** Resolve a backup filename safely inside BACKUP_DIR (no path traversal). */
+function resolveBackupFile(filename) {
+  const base = path.basename(String(filename || ''));
+  if (!isBackupFilename(base)) return null;
+  const full = path.resolve(BACKUP_DIR, base);
+  const root = path.resolve(BACKUP_DIR);
+  if (full !== root && !full.startsWith(root + path.sep)) return null;
+  return { filename: base, full };
+}
+
+function backupKeyFromSalt(salt) {
+  return crypto.scryptSync(BACKUP_SECRET, salt, 32);
+}
+
+/** Encrypt JSON payload → opaque binary (MAGIC|salt|iv|tag|ciphertext). */
+function encryptBackupPayload(payload) {
+  const plain = Buffer.from(JSON.stringify(payload), 'utf8');
+  const salt = crypto.randomBytes(16);
+  const iv = crypto.randomBytes(12);
+  const key = backupKeyFromSalt(salt);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(plain), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([BACKUP_MAGIC, salt, iv, tag, ciphertext]);
+}
+
+function hasBackupMagic(buf) {
+  return (
+    Buffer.isBuffer(buf) &&
+    buf.length >= BACKUP_MAGIC.length &&
+    buf.subarray(0, BACKUP_MAGIC.length).equals(BACKUP_MAGIC)
+  );
+}
+
+function fileHasBackupMagic(fullPath) {
+  try {
+    const fd = fs.openSync(fullPath, 'r');
+    try {
+      const hdr = Buffer.alloc(BACKUP_MAGIC.length);
+      const n = fs.readSync(fd, hdr, 0, hdr.length, 0);
+      return n === hdr.length && hdr.equals(BACKUP_MAGIC);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+}
+
+/** Decrypt backup file bytes → payload object. */
+function decryptBackupBuffer(buf) {
+  const minLen = BACKUP_MAGIC.length + 16 + 12 + 16;
+  if (!hasBackupMagic(buf) || buf.length < minLen) {
+    throw new Error('Not a Joshikai encrypted backup');
+  }
+  let offset = BACKUP_MAGIC.length;
+  const salt = buf.subarray(offset, offset + 16);
+  offset += 16;
+  const iv = buf.subarray(offset, offset + 12);
+  offset += 12;
+  const tag = buf.subarray(offset, offset + 16);
+  offset += 16;
+  const ciphertext = buf.subarray(offset);
+  const key = backupKeyFromSalt(salt);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  const plain = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  return JSON.parse(plain.toString('utf8'));
+}
+
+function loadBackupPayload(fullPath) {
+  const buf = fs.readFileSync(fullPath);
+  return decryptBackupBuffer(buf);
+}
+
+function stripDocIds(docs) {
+  return (Array.isArray(docs) ? docs : []).map((doc) => {
+    const obj = { ...doc };
+    delete obj._id;
+    delete obj.__v;
+    return obj;
+  });
+}
+
+async function buildBackupPayload() {
+  const [users, verifications, invitations, tables, messages, reports, counters] =
+    await Promise.all([
+      User.find().lean(),
+      Verification.find().lean(),
+      Invitation.find().lean(),
+      Table.find().lean(),
+      Message.find().lean(),
+      Report.find().lean(),
+      Counter.find().lean(),
+    ]);
+  const backedUpAt = new Date().toISOString();
+  return {
+    version: 1,
+    backedUpAt,
+    app: 'joshikai',
+    counts: {
+      users: users.length,
+      verifications: verifications.length,
+      invitations: invitations.length,
+      tables: tables.length,
+      messages: messages.length,
+      reports: reports.length,
+      counters: counters.length,
+    },
+    users: stripDocIds(users),
+    verifications: stripDocIds(verifications),
+    invitations: stripDocIds(invitations),
+    tables: stripDocIds(tables),
+    messages: stripDocIds(messages),
+    reports: stripDocIds(reports),
+    // Counter uses string _id as the key — keep it
+    counters: (counters || []).map((c) => ({
+      _id: c._id,
+      seq: c.seq,
+    })),
+  };
+}
+
+function readBackupMeta(fullPath, filename) {
+  let stat;
+  try {
+    stat = fs.statSync(fullPath);
+  } catch {
+    return null;
+  }
+  if (!stat.isFile()) return null;
+
+  let backedUpAt = null;
+  let counts = null;
+  let version = null;
+  let valid = false;
+  try {
+    const data = loadBackupPayload(fullPath);
+    if (data && typeof data === 'object') {
+      valid = true;
+      if (typeof data.backedUpAt === 'string' && data.backedUpAt) {
+        backedUpAt = data.backedUpAt;
+      }
+      if (data.counts && typeof data.counts === 'object') {
+        counts = data.counts;
+      } else {
+        counts = {
+          users: Array.isArray(data.users) ? data.users.length : 0,
+          verifications: Array.isArray(data.verifications)
+            ? data.verifications.length
+            : 0,
+          invitations: Array.isArray(data.invitations)
+            ? data.invitations.length
+            : 0,
+          tables: Array.isArray(data.tables) ? data.tables.length : 0,
+          messages: Array.isArray(data.messages) ? data.messages.length : 0,
+          reports: Array.isArray(data.reports) ? data.reports.length : 0,
+        };
+      }
+      if (data.version != null) version = data.version;
+    }
+  } catch {
+    valid = false;
+  }
+
+  return {
+    filename,
+    size: stat.size,
+    fileModifiedAt: stat.mtime.toISOString(),
+    backedUpAt: backedUpAt || stat.mtime.toISOString(),
+    counts,
+    version,
+    valid,
+  };
+}
+
+async function restoreFromBackupData(data) {
+  if (!data || typeof data !== 'object') {
+    throw new Error('Invalid backup file');
+  }
+  const users = Array.isArray(data.users) ? data.users : [];
+  const verifications = Array.isArray(data.verifications)
+    ? data.verifications
+    : [];
+  const invitations = Array.isArray(data.invitations) ? data.invitations : [];
+  const tables = Array.isArray(data.tables) ? data.tables : [];
+  const messages = Array.isArray(data.messages) ? data.messages : [];
+  const reports = Array.isArray(data.reports) ? data.reports : [];
+  const counters = Array.isArray(data.counters) ? data.counters : [];
+
+  await Promise.all([
+    User.deleteMany({}),
+    Verification.deleteMany({}),
+    Invitation.deleteMany({}),
+    Table.deleteMany({}),
+    Message.deleteMany({}),
+    Report.deleteMany({}),
+    Counter.deleteMany({}),
+  ]);
+
+  if (users.length) await User.insertMany(stripDocIds(users), { ordered: false });
+  if (verifications.length) {
+    await Verification.insertMany(stripDocIds(verifications), { ordered: false });
+  }
+  if (invitations.length) {
+    await Invitation.insertMany(stripDocIds(invitations), { ordered: false });
+  }
+  if (tables.length) await Table.insertMany(stripDocIds(tables), { ordered: false });
+  if (messages.length) {
+    await Message.insertMany(stripDocIds(messages), { ordered: false });
+  }
+  if (reports.length) {
+    await Report.insertMany(stripDocIds(reports), { ordered: false });
+  }
+  if (counters.length) {
+    await Counter.insertMany(
+      counters.map((c) => ({ _id: c._id, seq: Number(c.seq) || 0 })),
+      { ordered: false },
+    );
+  } else {
+    await syncCountersFromData();
+  }
+
+  userSessions.clear();
+
+  return {
+    users: users.length,
+    verifications: verifications.length,
+    invitations: invitations.length,
+    tables: tables.length,
+    messages: messages.length,
+    reports: reports.length,
+    counters: counters.length,
+  };
+}
 
 function newToken() {
   return crypto.randomBytes(32).toString('hex');
@@ -1968,10 +2273,172 @@ app.get('/chats', async (req, res) => {
   }
 });
 
+// ——— Admin backup / restore ———
+
+app.get('/admin/backups', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    ensureBackupDir();
+    const names = fs.readdirSync(BACKUP_DIR);
+    const items = [];
+    for (const name of names) {
+      if (!isBackupFilename(name)) continue;
+      const resolved = resolveBackupFile(name);
+      if (!resolved) continue;
+      if (!fileHasBackupMagic(resolved.full)) continue;
+      const meta = readBackupMeta(resolved.full, resolved.filename);
+      if (meta) items.push(meta);
+    }
+    items.sort((a, b) => String(b.backedUpAt).localeCompare(String(a.backedUpAt)));
+    res.json(items);
+  } catch (err) {
+    console.error('list backups failed', err);
+    res.status(500).json({ error: 'Failed to list backups' });
+  }
+});
+
+app.post('/admin/backups', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    ensureBackupDir();
+    const payload = await buildBackupPayload();
+    const filename = backupFilenameFor(payload.backedUpAt);
+    const full = path.join(BACKUP_DIR, filename);
+    const encrypted = encryptBackupPayload(payload);
+    fs.writeFileSync(full, encrypted);
+    const meta = readBackupMeta(full, filename);
+    res.status(201).json(meta);
+  } catch (err) {
+    console.error('create backup failed', err);
+    res.status(500).json({ error: 'Failed to create backup' });
+  }
+});
+
+/** Upload an encrypted backup file from the admin PC into backup/. */
+app.post(
+  '/admin/backups/upload',
+  express.raw({ type: () => true, limit: '80mb' }),
+  async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      ensureBackupDir();
+      const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
+      if (!buf.length) {
+        return res.status(400).json({ error: 'ファイルが空です' });
+      }
+      let data;
+      try {
+        data = validateEncryptedBackupBuffer(buf);
+      } catch (err) {
+        const code = err && err.message;
+        if (code === 'magic' || code === 'empty') {
+          return res.status(400).json({
+            error: 'Joshikai のバックアップファイルではありません',
+          });
+        }
+        if (code === 'payload') {
+          return res.status(400).json({
+            error: 'バックアップの内容が不完全です',
+          });
+        }
+        return res.status(400).json({
+          error:
+            'このバックアップは読み取れません（破損、または別の暗号化キー）',
+        });
+      }
+      let suggested =
+        typeof req.query.name === 'string'
+          ? req.query.name
+          : typeof req.headers['x-backup-filename'] === 'string'
+            ? req.headers['x-backup-filename']
+            : '';
+      try {
+        suggested = decodeURIComponent(suggested);
+      } catch (_) {
+        /* keep raw */
+      }
+      const preferred = sanitizeBackupUploadName(
+        suggested,
+        data.backedUpAt || new Date().toISOString(),
+      );
+      const { filename, full } = uniqueBackupFilename(preferred);
+      fs.writeFileSync(full, buf);
+      const meta = readBackupMeta(full, filename);
+      res.status(201).json(meta);
+    } catch (err) {
+      console.error('upload backup failed', err);
+      res.status(500).json({ error: 'アップロードに失敗しました' });
+    }
+  },
+);
+
+app.get('/admin/backups/:filename/download', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const resolved = resolveBackupFile(req.params.filename);
+    if (!resolved || !fs.existsSync(resolved.full)) {
+      return res.status(404).json({ error: 'Backup not found' });
+    }
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.download(resolved.full, resolved.filename);
+  } catch (err) {
+    console.error('download backup failed', err);
+    res.status(500).json({ error: 'Failed to download backup' });
+  }
+});
+
+app.post('/admin/backups/:filename/restore', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const resolved = resolveBackupFile(req.params.filename);
+    if (!resolved || !fs.existsSync(resolved.full)) {
+      return res.status(404).json({ error: 'Backup not found' });
+    }
+    let data;
+    try {
+      data = loadBackupPayload(resolved.full);
+    } catch {
+      return res.status(400).json({
+        error: 'このバックアップは復元できません（破損または別のキーで暗号化）',
+      });
+    }
+    if (!data || typeof data !== 'object' || !Array.isArray(data.users)) {
+      return res.status(400).json({
+        error: 'バックアップの内容が不完全です',
+      });
+    }
+    const restored = await restoreFromBackupData(data);
+    res.json({
+      ok: true,
+      filename: resolved.filename,
+      backedUpAt: data.backedUpAt || null,
+      restored,
+    });
+  } catch (err) {
+    console.error('restore backup failed', err);
+    res.status(500).json({ error: 'Failed to restore backup' });
+  }
+});
+
+app.delete('/admin/backups/:filename', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const resolved = resolveBackupFile(req.params.filename);
+    if (!resolved || !fs.existsSync(resolved.full)) {
+      return res.status(404).json({ error: 'Backup not found' });
+    }
+    fs.unlinkSync(resolved.full);
+    res.json({ ok: true, filename: resolved.filename });
+  } catch (err) {
+    console.error('delete backup failed', err);
+    res.status(500).json({ error: 'Failed to delete backup' });
+  }
+});
+
 async function start() {
   try {
+    ensureBackupDir();
     await connectMongo(MONGODB_URI);
-    await migrateFromJsonIfEmpty();
     await syncCountersFromData();
     const selfieBackfill = await backfillApprovedSelfies();
     if (selfieBackfill) {
@@ -1985,6 +2452,7 @@ async function start() {
       console.log(`Joshikai API listening on http://${HOST}:${PORT}`);
       console.log(`Admin web: http://${HOST}:${PORT}/admin/`);
       console.log(`MongoDB: ${MONGODB_URI.replace(/\/\/.*@/, '//***@')}`);
+      console.log(`Backup dir: ${BACKUP_DIR}`);
       console.log(`Admin login: ${ADMIN_EMAIL} / (see ADMIN_PASSWORD env)`);
     });
   } catch (err) {

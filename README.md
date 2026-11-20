@@ -75,8 +75,8 @@ npm run dev
 - Admin: `http://localhost:4100/admin/`
 - Health: `http://localhost:4100/health`（`mongo: true` なら DB 接続 OK）
 
-初回起動で DB が空の場合、`data.json` があればインポートし、デモユーザーを投入します。  
-On first start with an empty DB, imports `data.json` if present, then seeds demo users.
+初回起動時、デモユーザーが未登録なら投入します。  
+On first start, seeds demo users if they are not already registered.
 
 ---
 

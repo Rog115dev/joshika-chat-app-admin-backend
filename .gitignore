@@ -2,3 +2,7 @@ node_modules/
 *.log
 .env
 .DS_Store
+
+# Keep backup/ folder; ignore actual dump files
+backup/*
+!backup/.gitkeep

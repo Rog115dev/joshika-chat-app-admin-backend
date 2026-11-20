@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20261118b" />
+  <link rel="stylesheet" href="styles.css?v=20261120e" />
 </head>
 <body>
   <div id="app">
@@ -23,7 +23,6 @@
           <input type="password" id="admin-password" name="password" autocomplete="current-password" placeholder="••••••••" />
         </label>
         <button type="submit" id="admin-login-btn" class="btn-primary btn-block">ログイン / Sign in</button>
-        <p class="hint muted tiny">Default: admin@joshikai.local / admin123</p>
         <p id="login-error" class="error" hidden></p>
       </form>
     </section>
@@ -52,6 +51,10 @@
             <span class="nav-label">通報</span>
             <span class="nav-sub">Reports</span>
             <span id="reports-pill" class="nav-pill" hidden>0</span>
+          </button>
+          <button type="button" class="nav-item tab" data-tab="backups">
+            <span class="nav-label">バックアップ</span>
+            <span class="nav-sub">Backup / Restore</span>
           </button>
         </nav>
 
@@ -124,6 +127,22 @@
               </div>
               <div id="reports-list" class="list"></div>
             </div>
+
+            <div id="backups-stage" class="stage-panel" hidden>
+              <div class="backup-toolbar">
+                <div class="backup-toolbar-copy">
+                  <p class="muted tiny">
+                    すべてのメンバー・本人確認・通報などのデータを保存できます。復元すると、現在のデータはこのバックアップの内容に置き換わります。PC からバックアップをアップロードすることもできます。
+                  </p>
+                </div>
+                <div class="backup-toolbar-actions">
+                  <input type="file" id="backup-upload-input" tabindex="-1" aria-hidden="true" />
+                  <button type="button" id="backup-upload-btn" class="btn-soft">アップロード</button>
+                  <button type="button" id="backup-create-btn" class="btn-primary">バックアップ作成</button>
+                </div>
+              </div>
+              <div id="backups-list" class="list backup-list"></div>
+            </div>
           </section>
 
           <aside id="detail-drawer" class="detail-drawer" hidden aria-hidden="true">
@@ -148,6 +167,6 @@
   <div id="toast-host" class="toast-host" aria-live="polite"></div>
   <div id="modal-host" class="modal-host" hidden></div>
 
-  <script src="app.js?v=20261118b"></script>
+  <script src="app.js?v=20261120f"></script>
 </body>
 </html>
