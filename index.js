@@ -1412,11 +1412,25 @@ app.get('/room/profiles', async (req, res) => {
         return false;
       });
     }
-    if (interest) {
+    // Shared interests: peer must overlap the viewer on ≥1 interest key.
+    // If the viewer has none saved yet, skip this gate (other filters still apply).
+    const myInterests = new Set(
+      (me.interests || [])
+        .map((x) => String(x).trim().toLowerCase())
+        .filter(Boolean),
+    );
+    if (myInterests.size > 0) {
       rows = rows.filter((u) =>
-        (u.interests || []).some(
-          (x) => String(x).toLowerCase() === interest.toLowerCase(),
+        (u.interests || []).some((x) =>
+          myInterests.has(String(x).trim().toLowerCase()),
         ),
+      );
+    }
+    // Optional single-interest pin from query (AND with shared-interest gate).
+    if (interest) {
+      const want = interest.toLowerCase();
+      rows = rows.filter((u) =>
+        (u.interests || []).some((x) => String(x).toLowerCase() === want),
       );
     }
 
