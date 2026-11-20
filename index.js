@@ -1209,37 +1209,34 @@ app.post('/id-verifications', async (req, res) => {
     let user = await authUser(req);
 
     if (!user && profile.email && profile.password) {
+      // Never reuse / overwrite an existing account on register.
+      // Same email must always 409 — do not reset verificationStatus to pending.
       const existing = await findUserByEmail(profile.email);
       if (existing) {
-        const ok = await bcrypt.compare(profile.password, existing.passwordHash);
-        if (!ok) {
-          return res.status(409).json({ error: 'Email already registered' });
-        }
-        user = existing;
-      } else {
-        if (!profile.age || profile.age < 18) {
-          return res.status(400).json({
-            error: 'You must be 18 or older to register',
-          });
-        }
-        user = await User.create({
-          id: await getNextId('userId'),
-          email: profile.email,
-          passwordHash: await bcrypt.hash(profile.password, 10),
-          name: profile.name,
-          nickname: profile.nickname,
-          profileImageUrl: profile.profileImageUrl,
-          lifeStatus: profile.lifeStatus,
-          age: profile.age,
-          placeOfLiving: profile.placeOfLiving,
-          phoneNumber: profile.phoneNumber,
-          interests: profile.interests,
-          verificationStatus: 'pending',
-          verificationId: null,
-          passedUserIds: [],
-          createdAt: new Date().toISOString(),
+        return res.status(409).json({ error: 'Email already registered' });
+      }
+      if (!profile.age || profile.age < 18) {
+        return res.status(400).json({
+          error: 'You must be 18 or older to register',
         });
       }
+      user = await User.create({
+        id: await getNextId('userId'),
+        email: profile.email,
+        passwordHash: await bcrypt.hash(profile.password, 10),
+        name: profile.name,
+        nickname: profile.nickname,
+        profileImageUrl: profile.profileImageUrl,
+        lifeStatus: profile.lifeStatus,
+        age: profile.age,
+        placeOfLiving: profile.placeOfLiving,
+        phoneNumber: profile.phoneNumber,
+        interests: profile.interests,
+        verificationStatus: 'pending',
+        verificationId: null,
+        passedUserIds: [],
+        createdAt: new Date().toISOString(),
+      });
     } else if (
       !user &&
       body.userId != null &&
