@@ -69,6 +69,22 @@ function formatWhen(iso) {
   });
 }
 
+/** Japan standard: YYYY/MM/DD HH:mm (Asia/Tokyo, 24h). */
+function formatWhenJa(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
 function normalizeImageUrl(raw) {
   let s = String(raw || '').trim().replace(/^['"]+|['"]+$/g, '');
   if (!s) return '';
@@ -1180,7 +1196,7 @@ function buildBackupCard(row) {
   card.dataset.backupFile = row.filename;
   const body = document.createElement('div');
   body.className = 'card-body';
-  const dateLabel = formatWhen(row.backedUpAt);
+  const dateLabel = formatWhenJa(row.backedUpAt);
   const invalidNote = row.valid
     ? ''
     : '<p class="backup-invalid">このバックアップは破損しているため復元できません</p>';
@@ -1331,7 +1347,7 @@ async function restoreBackup(row) {
     title: 'バックアップから復元',
     bodyHtml: `
       <p>いまのデータをすべて消し、次の日付のバックアップに戻します。</p>
-      <p><strong>${escapeHtml(formatWhen(row.backedUpAt))}</strong></p>
+      <p><strong>${escapeHtml(formatWhenJa(row.backedUpAt))}</strong></p>
       <p class="tiny" style="color:var(--danger);margin-top:10px;">この操作は取り消せません。</p>
     `,
     confirmLabel: '復元する',
@@ -1356,7 +1372,7 @@ async function deleteBackup(row) {
     title: 'バックアップを削除',
     bodyHtml: `
       <p>このバックアップを一覧から削除します。</p>
-      <p><strong>${escapeHtml(formatWhen(row.backedUpAt))}</strong></p>
+      <p><strong>${escapeHtml(formatWhenJa(row.backedUpAt))}</strong></p>
     `,
     confirmLabel: '削除する',
     danger: true,
