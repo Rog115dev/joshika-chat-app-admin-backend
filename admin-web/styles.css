@@ -992,3 +992,111 @@ textarea {
   .detail dt { margin-top: 6px; }
   .detail-inner { padding: 16px; }
 }
+
+/* Backup / restore */
+.backup-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.backup-toolbar-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.backup-toolbar-copy code {
+  font-size: 0.85em;
+  background: var(--panel-2);
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
+.backup-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+/* Global input{display:block} would otherwise reveal the native file picker */
+#backup-upload-input {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.backup-toolbar-actions .btn-primary,
+.backup-toolbar-actions .btn-soft {
+  white-space: nowrap;
+}
+
+.backup-list .card {
+  cursor: default;
+}
+
+.backup-list .card:hover {
+  border-color: var(--line);
+}
+
+.backup-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.backup-card-actions button {
+  font-size: 0.82rem;
+  padding: 8px 12px;
+}
+
+.backup-invalid {
+  color: var(--danger);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.backup-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.backup-counts span {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  background: var(--panel-2);
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+@media (max-width: 640px) {
+  .backup-toolbar {
+    flex-direction: column;
+  }
+  .backup-toolbar-actions {
+    width: 100%;
+  }
+  .backup-toolbar-actions .btn-primary,
+  .backup-toolbar-actions .btn-soft {
+    flex: 1;
+  }
+}

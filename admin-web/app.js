@@ -25,6 +25,8 @@ const drawerScrim = document.getElementById('drawer-scrim');
 const verificationsStage = document.getElementById('verifications-stage');
 const usersStage = document.getElementById('users-stage');
 const reportsStage = document.getElementById('reports-stage');
+const backupsStage = document.getElementById('backups-stage');
+const backupsListEl = document.getElementById('backups-list');
 const loginError = document.getElementById('login-error');
 const dashTitle = document.getElementById('dash-title');
 const dashSubtitle = document.getElementById('dash-subtitle');
@@ -64,6 +66,22 @@ function formatWhen(iso) {
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+  });
+}
+
+/** Japan standard: YYYY/MM/DD HH:mm (Asia/Tokyo, 24h). */
+function formatWhenJa(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
   });
 }
 
@@ -295,13 +313,14 @@ function showDashboard() {
   if (loginView) {
     loginView.classList.add('view-hidden');
     loginView.setAttribute('hidden', '');
+    loginView.style.removeProperty('display');
   }
   if (!dashboardView) {
     throw new Error('Dashboard element missing from page.');
   }
   dashboardView.classList.remove('view-hidden');
   dashboardView.removeAttribute('hidden');
-  dashboardView.style.setProperty('display', 'flex', 'important');
+  dashboardView.style.removeProperty('display');
   try {
     setTab(activeTab || 'verifications');
     refreshCounts();
@@ -327,7 +346,7 @@ function showLogin(clearToken = true) {
   if (loginView) {
     loginView.classList.remove('view-hidden');
     loginView.removeAttribute('hidden');
-    loginView.style.setProperty('display', 'grid', 'important');
+    loginView.style.removeProperty('display');
   }
   const btn = document.getElementById('admin-login-btn');
   if (btn) {
@@ -396,7 +415,9 @@ function showListMode() {
         ? 'アカウントの検索・編集・パスワードリセット'
         : activeTab === 'reports'
           ? 'メンバーからの通報を確認・対応します'
-          : '提出された本人確認を確認・承認します';
+          : activeTab === 'backups'
+            ? '保存したデータから復元、またはファイルをダウンロードできます'
+            : '提出された本人確認を確認・承認します';
   }
 }
 
@@ -431,6 +452,7 @@ function setTab(tab) {
   if (verificationsStage) verificationsStage.hidden = tab !== 'verifications';
   if (usersStage) usersStage.hidden = tab !== 'users';
   if (reportsStage) reportsStage.hidden = tab !== 'reports';
+  if (backupsStage) backupsStage.hidden = tab !== 'backups';
   showListMode();
   if (tab === 'verifications') {
     dashTitle.textContent = '本人確認';
@@ -438,6 +460,13 @@ function setTab(tab) {
   } else if (tab === 'reports') {
     dashTitle.textContent = '通報';
     loadReports();
+  } else if (tab === 'backups') {
+    dashTitle.textContent = 'バックアップ';
+    if (dashSubtitle) {
+      dashSubtitle.textContent =
+        '保存したデータから復元、またはファイルをダウンロードできます';
+    }
+    loadBackups();
   } else {
     dashTitle.textContent = 'メンバー';
     loadUsers();
@@ -526,12 +555,29 @@ document.getElementById('refresh-btn')?.addEventListener('click', async () => {
   } else if (activeTab === 'reports') {
     if (selectedReportId != null) openReportDetail(selectedReportId);
     else loadReports();
+  } else if (activeTab === 'backups') {
+    await loadBackups({ soft: true });
   } else if (selectedId != null) {
     openDetail(selectedId);
   } else {
     loadList();
   }
   toast('最新の状態に更新しました');
+});
+
+document.getElementById('backup-create-btn')?.addEventListener('click', () => {
+  createBackup();
+});
+
+document.getElementById('backup-upload-btn')?.addEventListener('click', () => {
+  document.getElementById('backup-upload-input')?.click();
+});
+
+document.getElementById('backup-upload-input')?.addEventListener('change', (e) => {
+  const input = e.target;
+  const file = input?.files && input.files[0];
+  if (file) uploadBackupFile(file);
+  if (input) input.value = '';
 });
 
 document.querySelectorAll('.report-filter').forEach((btn) => {
@@ -1107,6 +1153,239 @@ async function updateReportStatus(id, status) {
     await openReportDetail(id);
   } catch (e) {
     toast(e.message || '更新に失敗しました', 'err');
+  }
+}
+
+function formatBytes(n) {
+  const size = Number(n) || 0;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function backupCountsHtml(counts) {
+  if (!counts || typeof counts !== 'object') return '';
+  const parts = [
+    ['users', 'メンバー'],
+    ['verifications', '本人確認'],
+    ['reports', '通報'],
+    ['messages', 'メッセージ'],
+    ['tables', 'テーブル'],
+    ['invitations', '招待'],
+  ]
+    .filter(([key]) => counts[key] != null)
+    .map(
+      ([key, label]) =>
+        `<span>${escapeHtml(label)} ${escapeHtml(String(counts[key]))}</span>`,
+    );
+  return parts.length ? `<div class="backup-counts">${parts.join('')}</div>` : '';
+}
+
+function renderBackupsEmpty() {
+  if (!backupsListEl) return;
+  backupsListEl.innerHTML = `
+    <div class="list-empty">
+      <p class="empty-title">まだバックアップがありません</p>
+      <p class="muted tiny">上の「バックアップ作成」から、いまのデータを保存できます。</p>
+    </div>`;
+}
+
+function buildBackupCard(row) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.dataset.backupFile = row.filename;
+  const body = document.createElement('div');
+  body.className = 'card-body';
+  const dateLabel = formatWhenJa(row.backedUpAt);
+  const invalidNote = row.valid
+    ? ''
+    : '<p class="backup-invalid">このバックアップは破損しているため復元できません</p>';
+  body.innerHTML = `
+    <p class="card-title">${escapeHtml(dateLabel)}</p>
+    <div class="card-meta">${escapeHtml(formatBytes(row.size))}</div>
+    ${backupCountsHtml(row.counts)}
+    ${invalidNote}
+    <div class="backup-card-actions">
+      <button type="button" class="btn-soft" data-backup-action="download">ダウンロード</button>
+      <button type="button" class="btn-ok" data-backup-action="restore" ${row.valid ? '' : 'disabled'}>復元</button>
+      <button type="button" class="danger" data-backup-action="delete">削除</button>
+    </div>
+  `;
+  body.querySelectorAll('[data-backup-action]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const action = btn.dataset.backupAction;
+      if (action === 'download') downloadBackup(row.filename);
+      else if (action === 'restore') restoreBackup(row);
+      else if (action === 'delete') deleteBackup(row);
+    });
+  });
+  card.appendChild(body);
+  return card;
+}
+
+function removeBackupCard(filename) {
+  if (!backupsListEl) return;
+  const card = backupsListEl.querySelector(
+    `.card[data-backup-file="${CSS.escape(filename)}"]`,
+  );
+  card?.remove();
+  if (!backupsListEl.querySelector('.card')) {
+    renderBackupsEmpty();
+  }
+}
+
+async function loadBackups({ soft = false } = {}) {
+  if (!backupsListEl) return;
+  const keepVisible = soft && !!backupsListEl.querySelector('.card');
+  if (!keepVisible) {
+    backupsListEl.innerHTML = '<p class="muted list-empty">読み込み中…</p>';
+  }
+  try {
+    const rows = await api('/admin/backups');
+    if (!Array.isArray(rows) || !rows.length) {
+      renderBackupsEmpty();
+      return;
+    }
+    const next = document.createDocumentFragment();
+    rows.forEach((row) => next.appendChild(buildBackupCard(row)));
+    backupsListEl.innerHTML = '';
+    backupsListEl.appendChild(next);
+  } catch (e) {
+    if (String(e.message).includes('401') || String(e.message).includes('Unauthorized')) {
+      showLogin();
+    } else if (!keepVisible) {
+      backupsListEl.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+    } else {
+      toast(e.message || '一覧の更新に失敗しました', 'err');
+    }
+  }
+}
+
+async function createBackup() {
+  const btn = document.getElementById('backup-create-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '作成中…';
+  }
+  try {
+    await api('/admin/backups', { method: 'POST', body: '{}' });
+    toast('バックアップを作成しました');
+    await loadBackups({ soft: true });
+  } catch (e) {
+    toast(e.message || 'バックアップに失敗しました', 'err');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'バックアップ作成';
+    }
+  }
+}
+
+async function uploadBackupFile(file) {
+  const btn = document.getElementById('backup-upload-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'アップロード中…';
+  }
+  try {
+    const buf = await file.arrayBuffer();
+    const res = await fetch(
+      `${API}/admin/backups/upload?name=${encodeURIComponent(file.name || '')}`,
+      {
+        method: 'POST',
+        headers: {
+          ...authHeaders(),
+          'Content-Type': 'application/octet-stream',
+          'X-Backup-Filename': encodeURIComponent(file.name || ''),
+        },
+        body: buf,
+      },
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || res.statusText || 'Upload failed');
+    }
+    toast('バックアップをアップロードしました');
+    await loadBackups({ soft: true });
+  } catch (e) {
+    toast(e.message || 'アップロードに失敗しました', 'err');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'アップロード';
+    }
+  }
+}
+
+async function downloadBackup(filename) {
+  try {
+    const res = await fetch(
+      `${API}/admin/backups/${encodeURIComponent(filename)}/download`,
+      { headers: authHeaders() },
+    );
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || res.statusText || 'Download failed');
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast('ダウンロードを開始しました');
+  } catch (e) {
+    toast(e.message || 'ダウンロードに失敗しました', 'err');
+  }
+}
+
+async function restoreBackup(row) {
+  const ok = await openModal({
+    title: 'バックアップから復元',
+    bodyHtml: `
+      <p>いまのデータをすべて消し、次の日付のバックアップに戻します。</p>
+      <p><strong>${escapeHtml(formatWhenJa(row.backedUpAt))}</strong></p>
+      <p class="tiny" style="color:var(--danger);margin-top:10px;">この操作は取り消せません。</p>
+    `,
+    confirmLabel: '復元する',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await api(`/admin/backups/${encodeURIComponent(row.filename)}/restore`, {
+      method: 'POST',
+      body: '{}',
+    });
+    toast('復元が完了しました');
+    await refreshCounts();
+    await loadBackups({ soft: true });
+  } catch (e) {
+    toast(e.message || '復元に失敗しました', 'err');
+  }
+}
+
+async function deleteBackup(row) {
+  const ok = await openModal({
+    title: 'バックアップを削除',
+    bodyHtml: `
+      <p>このバックアップを一覧から削除します。</p>
+      <p><strong>${escapeHtml(formatWhenJa(row.backedUpAt))}</strong></p>
+    `,
+    confirmLabel: '削除する',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await api(`/admin/backups/${encodeURIComponent(row.filename)}`, {
+      method: 'DELETE',
+    });
+    removeBackupCard(row.filename);
+    toast('バックアップを削除しました');
+  } catch (e) {
+    toast(e.message || '削除に失敗しました', 'err');
   }
 }
 
