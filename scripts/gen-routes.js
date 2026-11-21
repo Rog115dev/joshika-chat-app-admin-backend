@@ -6,13 +6,17 @@ const { User, Verification } = require('../models');
 const { getNextId } = require('../db');
 const { createAsyncRouter } = require('../middleware/createAsyncRouter');
 const { str } = require('../lib/util');
-const { userSessions, passwordResetCodes, newToken } = require('../lib/tokens');
+const {
+  userSessions,
+  passwordResetCodes,
+  newToken,
+  clearUserSessions,
+} = require('../lib/tokens');
 const { RESEND_API_KEY } = require('../config');
 const { logger } = require('../logger');
 const { makeResetCode, sendPasswordResetEmail } = require('../services/mail');
 const {
   findUserByEmail,
-  findUserById,
   publicUser,
   authUser,
   profileFromBody,
@@ -29,7 +33,7 @@ const { createAsyncRouter } = require('../middleware/createAsyncRouter');
 const { requireAdmin } = require('../middleware/auth');
 const { str } = require('../lib/util');
 const { clearUserSessions } = require('../lib/tokens');
-const { normalizeImageUrl, applyApprovedSelfieToProfile, latestVerificationForUser } = require('../lib/images');
+const { normalizeImageUrl, applyApprovedSelfieToProfile } = require('../lib/images');
 const { logger } = require('../logger');
 const {
   findUserById,
@@ -46,12 +50,12 @@ const { logger } = require('../logger');
 const { User, Verification } = require('../models');
 const { getNextId } = require('../db');
 const { createAsyncRouter } = require('../middleware/createAsyncRouter');
-const { requireAdmin } = require('../middleware/auth');
 const { str } = require('../lib/util');
 const { userSessions, newToken } = require('../lib/tokens');
 const { applyApprovedSelfieToProfile } = require('../lib/images');
 const { logger } = require('../logger');
 const {
+  authUser,
   findUserByEmail,
   findUserById,
   profileFromBody,
@@ -79,6 +83,15 @@ const {
   findUserById,
   declinePendingInvitesBetween,
 } = require('../services/users');
+
+const REPORT_REASONS = new Set([
+  'harassment',
+  'inappropriate',
+  'spam',
+  'fake',
+  'underage',
+  'other',
+]);
 `,
   adminReports: `const { Report } = require('../models');
 const { createAsyncRouter } = require('../middleware/createAsyncRouter');

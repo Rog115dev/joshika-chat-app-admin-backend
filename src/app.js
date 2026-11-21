@@ -1,4 +1,3 @@
-const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const { ADMIN_WEB_DIR } = require('./config');

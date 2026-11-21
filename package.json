@@ -6,8 +6,12 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "test": "node --test test/logger.test.js test/api.test.js test/health.test.js",
-    "test:contract": "node scripts/contract-check.js"
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "npm run lint && node --test test/logger.test.js test/api.test.js test/health.test.js && npm run test:audit",
+    "test:contract": "node scripts/contract-check.js",
+    "test:audit": "node scripts/audit-undef.js && node scripts/audit-refactor-parity.js && node scripts/audit-old-helpers.js",
+    "prepare": "husky"
   },
   "private": true,
   "dependencies": {
@@ -16,5 +20,13 @@
     "express": "^4.21.2",
     "mongoose": "^9.12.1",
     "sharp": "^0.35.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "acorn": "^8.19.0",
+    "acorn-walk": "^8.3.5",
+    "eslint": "^10.15.0",
+    "globals": "^17.14.0",
+    "husky": "^9.1.7"
   }
 }

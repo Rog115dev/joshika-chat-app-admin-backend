@@ -421,18 +421,6 @@ function showListMode() {
   }
 }
 
-function renderVerificationEmpty() {
-  closeDetailDrawer();
-}
-
-function renderUserEmpty() {
-  closeDetailDrawer();
-}
-
-function renderReportEmpty() {
-  closeDetailDrawer();
-}
-
 function fillCardBody(card, title, lines, badgesHtml) {
   const body = document.createElement('div');
   body.className = 'card-body';

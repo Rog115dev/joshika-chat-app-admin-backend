@@ -2,6 +2,7 @@ node_modules/
 *.log
 .env
 .DS_Store
+.audit-old-index.js
 
 # Keep backup/ folder; ignore actual dump files
 backup/*

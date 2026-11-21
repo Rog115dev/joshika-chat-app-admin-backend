@@ -9,6 +9,15 @@ const {
   declinePendingInvitesBetween,
 } = require('../services/users');
 
+const REPORT_REASONS = new Set([
+  'harassment',
+  'inappropriate',
+  'spam',
+  'fake',
+  'underage',
+  'other',
+]);
+
 const router = createAsyncRouter();
 
 router.post('/safety/report', async (req, res) => {

@@ -1,7 +1,6 @@
 const bcrypt = require('bcryptjs');
 const {
   User,
-  Verification,
   Invitation,
   Table,
   Message,

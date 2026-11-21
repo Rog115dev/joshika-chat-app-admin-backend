@@ -2,12 +2,12 @@ const bcrypt = require('bcryptjs');
 const { User, Verification } = require('../models');
 const { getNextId } = require('../db');
 const { createAsyncRouter } = require('../middleware/createAsyncRouter');
-const { requireAdmin } = require('../middleware/auth');
 const { str } = require('../lib/util');
 const { userSessions, newToken } = require('../lib/tokens');
 const { applyApprovedSelfieToProfile } = require('../lib/images');
 const { logger } = require('../logger');
 const {
+  authUser,
   findUserByEmail,
   findUserById,
   profileFromBody,

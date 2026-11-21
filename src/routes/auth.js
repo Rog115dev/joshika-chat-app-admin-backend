@@ -3,13 +3,17 @@ const { User, Verification } = require('../models');
 const { getNextId } = require('../db');
 const { createAsyncRouter } = require('../middleware/createAsyncRouter');
 const { str } = require('../lib/util');
-const { userSessions, passwordResetCodes, newToken } = require('../lib/tokens');
+const {
+  userSessions,
+  passwordResetCodes,
+  newToken,
+  clearUserSessions,
+} = require('../lib/tokens');
 const { RESEND_API_KEY } = require('../config');
 const { logger } = require('../logger');
 const { makeResetCode, sendPasswordResetEmail } = require('../services/mail');
 const {
   findUserByEmail,
-  findUserById,
   publicUser,
   authUser,
   profileFromBody,

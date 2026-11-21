@@ -4,7 +4,7 @@ const { createAsyncRouter } = require('../middleware/createAsyncRouter');
 const { requireAdmin } = require('../middleware/auth');
 const { str } = require('../lib/util');
 const { clearUserSessions } = require('../lib/tokens');
-const { normalizeImageUrl, applyApprovedSelfieToProfile, latestVerificationForUser } = require('../lib/images');
+const { normalizeImageUrl, applyApprovedSelfieToProfile } = require('../lib/images');
 const { logger } = require('../logger');
 const {
   findUserById,

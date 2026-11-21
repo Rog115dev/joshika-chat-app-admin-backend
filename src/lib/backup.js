@@ -42,7 +42,7 @@ function sanitizeBackupUploadName(rawName, backedUpAt) {
     base = base.replace(/\.[A-Za-z0-9]{1,10}$/, '');
   }
   base = base
-    .replace(/[^\w\-]+/g, '-')
+    .replace(/[^\w-]+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-+|-+$/g, '');
   if (isBackupFilename(base)) return base;

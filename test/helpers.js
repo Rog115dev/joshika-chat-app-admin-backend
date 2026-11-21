@@ -68,7 +68,7 @@ async function startTestServer() {
       body: body != null ? JSON.stringify(body) : undefined,
     });
     const text = await res.text();
-    let json = null;
+    let json;
     try {
       json = text ? JSON.parse(text) : null;
     } catch {

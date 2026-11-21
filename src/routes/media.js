@@ -97,7 +97,7 @@ router.get('/media/image', async (req, res) => {
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'public, max-age=3600');
     res.send(buf);
-  } catch (err) {
+  } catch (_err) {
     res.status(502).json({ error: 'Could not load image' });
   }
 });

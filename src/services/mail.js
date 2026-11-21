@@ -34,7 +34,7 @@ async function sendPasswordResetEmail(toEmail, code) {
     }),
   });
   if (!response.ok) {
-    let detail = '';
+    let detail;
     try {
       const body = await response.json();
       detail = body?.message || body?.error || JSON.stringify(body);
